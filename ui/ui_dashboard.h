@@ -1,0 +1,23 @@
+#ifndef UI_DASHBOARD_H
+#define UI_DASHBOARD_H
+
+#include <stdint.h>
+#include "../algo/comfort_index.h"
+
+/* 启动时调用一次，初始化 LVGL 及所有控件 */
+void dashboard_init(void);
+
+/* 各传感器数据更新接口，可从 embedmq handler 线程安全调用 */
+void dashboard_update_dht11   (float temp, float humidity);
+void dashboard_update_accel   (float x, float y, float z, float magnitude);
+void dashboard_update_pir     (uint8_t detected);
+void dashboard_update_distance(float cm);
+void dashboard_update_light   (uint16_t lux);
+void dashboard_update_comfort (float heat_index, comfort_level_t level);
+void dashboard_show_alert     (uint8_t type, float magnitude);
+void dashboard_handle_ir_key  (uint16_t key_code);
+
+/* LVGL tick，在主循环中周期调用 */
+void dashboard_tick(void);
+
+#endif /* UI_DASHBOARD_H */

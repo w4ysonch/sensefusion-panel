@@ -1,0 +1,7 @@
+[submodule "third_party/embedmq"]
+	path = third_party/embedmq
+	url = https://github.com/w4ysonch/embedmq.git
+
+[submodule "third_party/lvgl"]
+	path = third_party/lvgl
+	url = https://github.com/lvgl/lvgl.git
