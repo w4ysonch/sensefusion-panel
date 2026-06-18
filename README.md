@@ -15,6 +15,60 @@
 | 触摸屏 | `/dev/input/event*` | 多点触控 |
 | 红外遥控 | `/dev/input/event*` | 按键输入 |
 
+## 架构
+
+```
+                    ┌─────────────────┐
+                    │     main.c      │
+                    │  初始化 + 启动   │
+                    └────────┬────────┘
+                             │
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+    传感器线程组          输入线程组           LVGL 主线程
+  ┌──────────────┐    ┌─────────────┐    ┌──────────────────┐
+  │ dht11_thread │    │touch_thread │    │ dashboard_tick() │
+  │ adxl_thread  │    │  ir_thread  │    │ lv_timer_handler │
+  │ sr501_thread │    └──────┬──────┘    └────────▲─────────┘
+  │ sr04_thread  │           │                    │
+  │ light_thread │           │            写 sensor_cache
+  └──────┬───────┘           │            （mutex 保护）
+         │ embedmq_post()    │                    │
+         └───────────┬───────┘                    │
+                     ▼                            │
+              ┌────────────┐                      │
+              │  embedmq   │                      │
+              │ 消费者线程  │                      │
+              └─────┬──────┘                      │
+                    │ 调用注册的 handler            │
+          ┌─────────┼──────────┐                  │
+          ▼         ▼          ▼                  │
+     ui_on_dht11  ui_on_accel  ...  ──────────────┘
+          │
+          ▼
+     algo/comfort_index
+     algo/anomaly
+          │
+          ▼ embedmq_post(EVT_ALGO_*)
+     ui_on_comfort / ui_on_anomaly
+```
+
+传感器线程只管 post，不碰 LVGL；embedmq 回调只写缓存；所有 LVGL 调用集中在主线程的 `dashboard_tick()`。详见 [docs/DESIGN.md](docs/DESIGN.md)。
+
+## 事件总线
+
+| 事件 | payload | 发送方 |
+|---|---|---|
+| `EVT_SENSOR_DHT11` | `{ temperature, humidity }` | sensor_dht11 |
+| `EVT_SENSOR_ADXL345` | `{ x, y, z, magnitude }` | sensor_adxl345 |
+| `EVT_SENSOR_SR501` | `{ detected }` | sensor_sr501 |
+| `EVT_SENSOR_SR04` | `{ distance_cm }` | sensor_sr04 |
+| `EVT_SENSOR_LIGHT` | `{ lux }` | sensor_light |
+| `EVT_ALGO_COMFORT` | `{ score, level }` | algo/comfort_index |
+| `EVT_ALGO_ANOMALY` | `{ source, value, baseline }` | algo/anomaly |
+| `EVT_INPUT_TOUCH` | `{ x, y }` | input_touch |
+| `EVT_INPUT_IR` | `{ key_code }` | input_ir |
+
 ## 编译
 
 ### 依赖
@@ -30,6 +84,8 @@ sudo apt install cmake gcc g++ libsdl2-dev
 ### PC 模拟器（SDL2 窗口，无需板子）
 
 ```bash
+git clone --recurse-submodules https://github.com/w4ysonch/sensefusion-panel.git
+cd sensefusion-panel
 mkdir build && cd build
 cmake .. -DSIMULATOR=ON
 make -j$(nproc)
@@ -60,26 +116,11 @@ sensefusion-panel/
 ├── fonts/                  自定义 LVGL 字体文件（CJK 待添加）
 ├── third_party/
 │   ├── embedmq/            消息总线库（git submodule）
-│   ├── lvgl/               LVGL v9（直接 clone）
+│   ├── lvgl/               LVGL v9（git submodule）
 │   └── lv_conf.h           LVGL 配置
-└── cmake/                  交叉编译 toolchain（TODO）
+├── cmake/                  交叉编译 toolchain（TODO）
+└── docs/                   设计文档
 ```
-
-## 架构
-
-```
-传感器线程  ──embedmq_post──►  embedmq 消费者线程
-                                      │
-                              ui_handlers（embedmq 回调）
-                             ┌────────┴────────┐
-                      写 sensor_cache      调用 algo 模块
-                             │                  │
-                        主线程 dashboard_tick()  └─► embedmq_post 算法结果
-                             │
-                        lv_timer_handler()
-```
-
-传感器线程与 LVGL 主线程通过 `sensor_cache_t`（mutex 保护）解耦，embedmq 消费者线程只写缓存，LVGL 调用只在主线程。
 
 ## 当前状态
 
@@ -90,3 +131,7 @@ sensefusion-panel/
 - [ ] CJK 字体（中文暂显示为方块）
 - [ ] EEPROM 存储
 - [ ] 交叉编译 toolchain 文件
+
+## License
+
+MIT © 2026 w4ysonch
