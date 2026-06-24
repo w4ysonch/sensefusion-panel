@@ -1,10 +1,23 @@
 #include <stdio.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <linux/input.h>
 #include "input_ir.h"
 #include "../app/app_init.h"
 #include "../app/app_events.h"
+
+#ifdef SIMULATOR
+
+/* 模拟器下键盘输入由 LVGL SDL 驱动直接处理（lv_sdl_keyboard_create），
+ * 此线程无需运行，立即退出即可。 */
+void *input_ir_thread(void *arg)
+{
+    (void)arg;
+    return NULL;
+}
+
+#else
+
+#include <unistd.h>
+#include <fcntl.h>
+#include <linux/input.h>
 
 /* 红外遥控 input 设备路径，具体编号以板子实际为准 */
 #define IR_DEVICE "/dev/input/event1"
@@ -37,3 +50,5 @@ void *input_ir_thread(void *arg)
     close(fd);
     return NULL;
 }
+
+#endif /* SIMULATOR */

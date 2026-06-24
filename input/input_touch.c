@@ -1,11 +1,24 @@
 #include <stdio.h>
+#include "input_touch.h"
+#include "../app/app_init.h"
+#include "../app/app_events.h"
+
+#ifdef SIMULATOR
+
+/* 模拟器下触摸由 LVGL SDL 驱动直接处理（lv_sdl_mouse_create），
+ * 此线程无需运行，立即退出即可。 */
+void *input_touch_thread(void *arg)
+{
+    (void)arg;
+    return NULL;
+}
+
+#else
+
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
-#include "input_touch.h"
-#include "../app/app_init.h"
-#include "../app/app_events.h"
 
 /* 触摸屏 input 设备路径，实际路径以 /proc/bus/input/devices 为准 */
 #define TOUCH_DEVICE "/dev/input/event0"
@@ -40,3 +53,5 @@ void *input_touch_thread(void *arg)
     close(fd);
     return NULL;
 }
+
+#endif /* SIMULATOR */
