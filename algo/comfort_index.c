@@ -4,8 +4,7 @@
 #include "../app/app_events.h"
 
 /* Steadman 体感温度（热指数）近似公式。
- * 适用范围：温度 20~50°C，湿度 40~100%。
- * 返回体感温度（°C）。 */
+ * 有效范围：温度 20~50°C，湿度 40~100%。超出范围直接跳过，不套公式。 */
 static float heat_index(float t, float rh)
 {
     return -8.78469475556f
@@ -34,7 +33,14 @@ void algo_comfort_on_dht11(const void *payload, size_t size, void *ctx)
     if (size < sizeof(evt_dht11_t)) return;
 
     const evt_dht11_t *raw = (const evt_dht11_t *)payload;
-    float hi = heat_index(raw->temperature, raw->humidity);
+
+    /* Steadman 公式仅在有效范围内可信；超出范围用温度直接分级。 */
+    float hi;
+    if (raw->temperature >= 20.0f && raw->humidity >= 40.0f) {
+        hi = heat_index(raw->temperature, raw->humidity);
+    } else {
+        hi = raw->temperature;
+    }
 
     evt_comfort_t ev;
     ev.heat_index = hi;
