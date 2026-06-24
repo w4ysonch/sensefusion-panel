@@ -11,6 +11,7 @@ void ui_on_sr04    (const void *payload, size_t size, void *ctx);
 void ui_on_light   (const void *payload, size_t size, void *ctx);
 void ui_on_comfort (const void *payload, size_t size, void *ctx);
 void ui_on_anomaly (const void *payload, size_t size, void *ctx);
+void ui_on_touch   (const void *payload, size_t size, void *ctx);
 void ui_on_ir      (const void *payload, size_t size, void *ctx);
 
 #endif /* UI_HANDLERS_H */

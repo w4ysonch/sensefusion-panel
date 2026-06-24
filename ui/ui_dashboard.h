@@ -15,9 +15,11 @@ void dashboard_update_distance(float cm);
 void dashboard_update_light   (uint16_t lux);
 void dashboard_update_comfort (float heat_index, comfort_level_t level);
 void dashboard_show_alert     (uint8_t type, float magnitude);
+void dashboard_update_touch   (int32_t x, int32_t y);
 void dashboard_handle_ir_key  (uint16_t key_code);
 
-/* LVGL tick，在主循环中周期调用 */
-void dashboard_tick(void);
+/* LVGL tick，在主循环中周期调用。
+ * 返回值：距下次需要处理的最短等待时间（ms），可直接传给 usleep()。 */
+uint32_t dashboard_tick(void);
 
 #endif /* UI_DASHBOARD_H */

@@ -27,9 +27,10 @@ int app_init(void)
     embedmq_register(g_mq, EVT_SENSOR_LIGHT,   ui_on_light,   NULL);
     embedmq_register(g_mq, EVT_ALGO_COMFORT,   ui_on_comfort, NULL);
     embedmq_register(g_mq, EVT_ALERT_ANOMALY,  ui_on_anomaly, NULL);
+    embedmq_register(g_mq, EVT_INPUT_TOUCH,    ui_on_touch,   NULL);
     embedmq_register(g_mq, EVT_INPUT_IR,       ui_on_ir,      NULL);
 
-    printf("[app] embedmq 初始化完成，已注册 8 个处理器\n");
+    printf("[app] embedmq 初始化完成，已注册 9 个处理器\n");
     return 0;
 }
 
