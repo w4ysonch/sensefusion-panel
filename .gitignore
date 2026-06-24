@@ -1,8 +1,37 @@
+# Build outputs
 build/
+build-*/
 *.o
 *.a
 *.so
 *.d
-.cache/
-compile_commands.json
 sensefusion-panel
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+.cmake/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Caches
+.cache/
+.ccache/
+
+# Cross-compile sysroot（本地路径，不入库）
+sysroot/
+
+# SQLite 运行时数据（不入库）
+*.db
+*.db-wal
+*.db-shm

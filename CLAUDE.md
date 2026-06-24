@@ -34,8 +34,8 @@ sensefusion-panel/
 ├── third_party/
 │   ├── embedmq/            git submodule
 │   ├── lvgl/               git submodule (LVGL v9)
-│   └── lv_conf.h           LVGL config — must stay here (lvgl CMake looks in parent of lvgl/)
-└── cmake/                  Cross-compile toolchain (TODO)
+│   └── lv_conf.h           LVGL config — LV_BUILD_CONF_DIR in CMakeLists.txt points here
+└── cmake/                  Cross-compile toolchain (arm-linux-gnueabihf.cmake)
 ```
 
 ---
