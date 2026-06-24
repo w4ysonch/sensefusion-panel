@@ -124,13 +124,22 @@ sensefusion-panel/
 
 ## 当前状态
 
-- [x] PC 模拟器可运行，深色主题 800×480 Dashboard
-- [x] embedmq 事件链路：传感器 → UI → 算法 → UI
-- [ ] 传感器驱动（板子上待实现）
+**Phase 3 完成，数据层与网络已就绪：**
+
+- [x] PC 模拟器可运行，深色主题 800×480 三 Tab UI（总览 / 趋势 / 设置）
+- [x] embedmq 事件链路：传感器 → UI → 算法 → UI（9 个处理器）
+- [x] 模拟器随机游走数据（5 路传感器实时动态变化）
+- [x] 趋势页：5 个 lv_chart 折线图（60 点滚动，温湿度 / 距离 / 光照 / 加速度幅值）
+- [x] SQLite 数据持久化（WAL 模式，每次传感器更新写入）
+- [x] SQLite amalgamation 内嵌（third_party/sqlite3/），交叉编译不依赖系统库
+- [x] MQTT 可选发布（-DMQTT=ON，libmosquitto 异步，主题 sensefusion/\<sensor\>）
+- [x] IR 遥控 Tab 切换（KEY_LEFT/RIGHT 循环切换三页面）
+- [x] 异常检测告警横幅 5 秒自动消失 / 触摸提前 dismiss
+- [x] 交叉编译 toolchain 骨架（cmake/arm-linux-gnueabihf.cmake）
+- [ ] 传感器驱动（板子上待实现，见 sensors/ 各 TODO 注释）
 - [ ] LVGL framebuffer HAL（板子上待实现）
 - [ ] CJK 字体（中文暂显示为方块）
 - [ ] EEPROM 存储
-- [ ] 交叉编译 toolchain 文件
 
 ## License
 
