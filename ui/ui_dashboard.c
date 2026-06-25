@@ -11,6 +11,10 @@
 #include "../sim/lv_drv_sdl.h"
 #endif
 
+LV_FONT_DECLARE(lv_font_sf_sc_14);
+LV_FONT_DECLARE(lv_font_sf_sc_16);
+LV_FONT_DECLARE(lv_font_sf_sc_28);
+
 /* ── 颜色主题 ─────────────────────────────────────────────── */
 #define CLR_BG        lv_color_hex(0x0d1117)
 #define CLR_CARD      lv_color_hex(0x161b22)
@@ -114,7 +118,7 @@ static lv_obj_t *create_card(lv_obj_t *parent, const char *title,
     lv_obj_t *lbl = lv_label_create(card);
     lv_label_set_text(lbl, title);
     lv_obj_set_style_text_color(lbl, CLR_TITLE, 0);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_sf_sc_14, 0);
     lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
     return card;
 }
@@ -124,7 +128,7 @@ static lv_obj_t *create_value_label(lv_obj_t *card, const char *text, int32_t y)
     lv_obj_t *lbl = lv_label_create(card);
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_color(lbl, CLR_VALUE, 0);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_sf_sc_28, 0);
     lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, y);
     return lbl;
 }
@@ -134,7 +138,7 @@ static lv_obj_t *create_sub_label(lv_obj_t *card, const char *text, int32_t y)
     lv_obj_t *lbl = lv_label_create(card);
     lv_label_set_text(lbl, text);
     lv_obj_set_style_text_color(lbl, CLR_SUB, 0);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_sf_sc_14, 0);
     lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, y);
     return lbl;
 }
@@ -155,7 +159,7 @@ static lv_obj_t *create_chart(lv_obj_t *parent, const char *title,
     lv_obj_t *lbl = lv_label_create(card);
     lv_label_set_text(lbl, title);
     lv_obj_set_style_text_color(lbl, CLR_TITLE, 0);
-    lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(lbl, &lv_font_sf_sc_14, 0);
     lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, 0);
 
     /* 图表本体 */
@@ -247,7 +251,7 @@ static void build_tab_settings(lv_obj_t *tab)
     g_label_mqtt_val = lv_label_create(card_mqtt);
     lv_label_set_text(g_label_mqtt_val, "---");
     lv_obj_set_style_text_color(g_label_mqtt_val, CLR_VALUE, 0);
-    lv_obj_set_style_text_font(g_label_mqtt_val, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(g_label_mqtt_val, &lv_font_sf_sc_14, 0);
     lv_obj_align(g_label_mqtt_val, LV_ALIGN_TOP_LEFT, 0, 76);
 
     /* DB 状态卡 */
@@ -261,7 +265,7 @@ static void build_tab_settings(lv_obj_t *tab)
     g_label_db_val = lv_label_create(card_db);
     lv_label_set_text(g_label_db_val, "---");
     lv_obj_set_style_text_color(g_label_db_val, CLR_VALUE, 0);
-    lv_obj_set_style_text_font(g_label_db_val, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(g_label_db_val, &lv_font_sf_sc_14, 0);
     lv_obj_align(g_label_db_val, LV_ALIGN_TOP_LEFT, 0, 76);
 
     /* IR 遥控说明 */
@@ -326,7 +330,7 @@ static void build_ui(void)
     g_label_alert = lv_label_create(g_panel_alert);
     lv_label_set_text(g_label_alert, "告警");
     lv_obj_set_style_text_color(g_label_alert, CLR_VALUE, 0);
-    lv_obj_set_style_text_font(g_label_alert, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(g_label_alert, &lv_font_sf_sc_16, 0);
     lv_obj_align(g_label_alert, LV_ALIGN_LEFT_MID, 12, 0);
 }
 
