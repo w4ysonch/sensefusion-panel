@@ -51,6 +51,9 @@ set(SOURCES
     storage/db.c
     network/mqtt_client.c
     third_party/sqlite3/sqlite3.c
+    fonts/lv_font_sf_sc_14.c
+    fonts/lv_font_sf_sc_16.c
+    fonts/lv_font_sf_sc_28.c
 )
 
 # 模拟器额外增加 SDL2 HAL
