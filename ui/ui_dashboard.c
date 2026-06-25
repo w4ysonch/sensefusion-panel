@@ -185,6 +185,19 @@ static lv_obj_t *create_chart(lv_obj_t *parent, const char *title,
     return chart;
 }
 
+/* LVGL v9 tabview tab bar 结构：lv_obj 容器 → lv_button → lv_label
+ * label 不继承父控件 style，无公开 API 直接设置字体，只能遍历设置 */
+static void set_tabview_tab_font(lv_obj_t *tabview, const lv_font_t *font)
+{
+    lv_obj_t *bar = lv_tabview_get_tab_bar(tabview);
+    uint32_t n = lv_obj_get_child_count(bar);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *btn = lv_obj_get_child(bar, (int32_t)i);
+        lv_obj_t *lbl = lv_obj_get_child(btn, 0);
+        if (lbl) lv_obj_set_style_text_font(lbl, font, 0);
+    }
+}
+
 /* ── 各 Tab 构建 ─────────────────────────────────────────── */
 
 /* 总览 Tab — 沿用原有卡片布局，y 坐标相对于 tab 内容区 */
@@ -302,6 +315,8 @@ static void build_ui(void)
     lv_obj_t *tab_overview = lv_tabview_add_tab(g_tabview, "  总览  ");
     lv_obj_t *tab_trend    = lv_tabview_add_tab(g_tabview, "  趋势  ");
     lv_obj_t *tab_settings = lv_tabview_add_tab(g_tabview, "  设置  ");
+
+    set_tabview_tab_font(g_tabview, &lv_font_sf_sc_16);
 
     /* 各 tab 背景与内边距 */
     lv_obj_t *tabs[3] = {tab_overview, tab_trend, tab_settings};
