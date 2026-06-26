@@ -3,6 +3,8 @@
 #include <sqlite3.h>
 #include "db.h"
 
+#define SECS_PER_DAY  86400
+
 static sqlite3     *s_db     = NULL;
 static const char  *s_status = "未初始化";
 
@@ -92,7 +94,7 @@ void db_cleanup_old(int keep_days)
     sqlite3_stmt *stmt;
     if (sqlite3_prepare_v2(s_db, SQL, -1, &stmt, NULL) != SQLITE_OK) return;
     sqlite3_bind_int64(stmt, 1,
-        (sqlite3_int64)(time(NULL) - (time_t)keep_days * 86400));
+        (sqlite3_int64)(time(NULL) - (time_t)keep_days * SECS_PER_DAY));
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     sqlite3_exec(s_db, "PRAGMA wal_checkpoint(TRUNCATE);", NULL, NULL, NULL);

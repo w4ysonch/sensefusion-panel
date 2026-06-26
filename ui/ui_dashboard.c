@@ -438,15 +438,18 @@ void dashboard_update_touch(int32_t x, int32_t y)
     pthread_mutex_unlock(&g_mutex);
 }
 
+/* linux/input-event-codes.h */
+#define IR_KEY_LEFT   105
+#define IR_KEY_RIGHT  106
+
 /* IR 遥控切换 Tab，运行在 embedmq 消费者线程：只写缓存 */
 void dashboard_handle_ir_key(uint16_t key_code)
 {
-    /* KEY_LEFT=105 KEY_RIGHT=106（linux/input-event-codes.h） */
-    if (key_code == 105 || key_code == 106) {
+    if (key_code == IR_KEY_LEFT || key_code == IR_KEY_RIGHT) {
         /* 需要在主线程操作 LVGL，借用 touch_dirty 触发 tick 内切换 */
         pthread_mutex_lock(&g_mutex);
         /* 用负值区分 IR 切换（touch x 通常为正） */
-        g_cache.touch_x    = (key_code == 106) ? -2 : -1;
+        g_cache.touch_x    = (key_code == IR_KEY_RIGHT) ? -2 : -1;
         g_cache.touch_dirty = true;
         pthread_mutex_unlock(&g_mutex);
     } else {
