@@ -9,6 +9,8 @@
 
 #ifdef SIMULATOR
 #include "../sim/lv_drv_sdl.h"
+#else
+#include "lvgl/drivers/display/lv_linux_fbdev.h"
 #endif
 
 LV_FONT_DECLARE(lv_font_sf_sc_14);
@@ -54,6 +56,7 @@ typedef struct {
     uint8_t  comfort_level;
     float    anomaly_mag;
     int32_t  touch_x, touch_y;
+    uint8_t  touch_pressed;
 } sensor_cache_t;
 
 static sensor_cache_t  g_cache = {0};
@@ -349,6 +352,24 @@ static void build_ui(void)
     lv_obj_align(g_label_alert, LV_ALIGN_LEFT_MID, 12, 0);
 }
 
+/* ── 板子触摸 indev（LVGL 原生交互：Tab 点击/滑动等） ── */
+#ifndef SIMULATOR
+
+static lv_indev_t *g_touch_indev;
+
+static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    (void)indev;
+    pthread_mutex_lock(&g_mutex);
+    data->point.x = g_cache.touch_x;
+    data->point.y = g_cache.touch_y;
+    data->state   = g_cache.touch_pressed ? LV_INDEV_STATE_PRESSED
+                                          : LV_INDEV_STATE_RELEASED;
+    pthread_mutex_unlock(&g_mutex);
+}
+
+#endif
+
 /* ── 公开接口 ────────────────────────────────────────────── */
 
 void dashboard_init(void)
@@ -359,10 +380,19 @@ void dashboard_init(void)
     printf("[dashboard] SDL2 模拟器初始化完成\n");
 #else
     lv_init();
-    /* TODO: 板子 framebuffer HAL */
-    printf("[dashboard] 板子 HAL TODO\n");
+    lv_display_t *disp = lv_linux_fbdev_create();
+    lv_linux_fbdev_set_file(disp, "/dev/fb0");
+    printf("[dashboard] FBDEV /dev/fb0 初始化完成\n");
 #endif
     build_ui();
+
+#ifndef SIMULATOR
+    /* 注册触摸 indev，让 LVGL 原生处理点击/滑动 */
+    g_touch_indev = lv_indev_create();
+    lv_indev_set_type(g_touch_indev, LV_INDEV_TYPE_POINTER);
+    lv_indev_set_read_cb(g_touch_indev, touch_read_cb);
+    lv_indev_set_display(g_touch_indev, lv_display_get_default());
+#endif
 }
 
 /* 以下 update_* 运行在 embedmq 消费者线程，只写缓存 */
@@ -429,12 +459,13 @@ void dashboard_show_alert(uint8_t type, float magnitude)
     pthread_mutex_unlock(&g_mutex);
 }
 
-void dashboard_update_touch(int32_t x, int32_t y)
+void dashboard_update_touch(int32_t x, int32_t y, uint8_t pressed)
 {
     pthread_mutex_lock(&g_mutex);
-    g_cache.touch_x     = x;
-    g_cache.touch_y     = y;
-    g_cache.touch_dirty = true;
+    g_cache.touch_x        = x;
+    g_cache.touch_y        = y;
+    g_cache.touch_pressed  = pressed;
+    g_cache.touch_dirty    = true;
     pthread_mutex_unlock(&g_mutex);
 }
 

@@ -20,7 +20,7 @@ void *input_ir_thread(void *arg)
 #include <linux/input.h>
 
 /* 红外遥控 input 设备路径，具体编号以板子实际为准 */
-#define IR_DEVICE "/dev/input/event1"
+#define IR_DEVICE "/dev/input/event_ir_todo"
 
 void *input_ir_thread(void *arg)
 {

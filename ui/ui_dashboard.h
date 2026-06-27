@@ -15,7 +15,7 @@ void dashboard_update_distance(float cm);
 void dashboard_update_light   (uint16_t lux);
 void dashboard_update_comfort (float heat_index, comfort_level_t level);
 void dashboard_show_alert     (uint8_t type, float magnitude);
-void dashboard_update_touch   (int32_t x, int32_t y);
+void dashboard_update_touch   (int32_t x, int32_t y, uint8_t pressed);
 void dashboard_handle_ir_key  (uint16_t key_code);
 
 /* LVGL tick，在主循环中周期调用。

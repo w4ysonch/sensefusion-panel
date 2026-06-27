@@ -21,7 +21,7 @@ void *input_touch_thread(void *arg)
 #include <linux/input.h>
 
 /* 触摸屏 input 设备路径，实际路径以 /proc/bus/input/devices 为准 */
-#define TOUCH_DEVICE "/dev/input/event0"
+#define TOUCH_DEVICE "/dev/input/event1"
 
 void *input_touch_thread(void *arg)
 {
@@ -41,8 +41,10 @@ void *input_touch_thread(void *arg)
         if (read(fd, &ie, sizeof(ie)) < 0)
             break;
 
-        /* 多点触控 B 协议：累积坐标，SYN_REPORT 时统一上报 */
-        if (ie.type == EV_ABS) {
+        /* 多点触控 B 协议：累积坐标与按下状态，SYN_REPORT 时统一上报 */
+        if (ie.type == EV_KEY && ie.code == BTN_TOUCH) {
+            ev.pressed = (uint8_t)ie.value;
+        } else if (ie.type == EV_ABS) {
             if (ie.code == ABS_MT_POSITION_X)  ev.x = ie.value;
             if (ie.code == ABS_MT_POSITION_Y)  ev.y = ie.value;
         } else if (ie.type == EV_SYN && ie.code == SYN_REPORT) {

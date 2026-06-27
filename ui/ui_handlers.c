@@ -89,7 +89,7 @@ void ui_on_touch(const void *payload, size_t size, void *ctx)
     (void)ctx;
     if (size < sizeof(evt_touch_t)) return;
     const evt_touch_t *ev = (const evt_touch_t *)payload;
-    dashboard_update_touch(ev->x, ev->y);
+    dashboard_update_touch(ev->x, ev->y, ev->pressed);
 }
 
 void ui_on_ir(const void *payload, size_t size, void *ctx)
