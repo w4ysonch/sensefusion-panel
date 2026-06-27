@@ -77,7 +77,7 @@ sudo apt install cmake gcc g++ libsdl2-dev
 sudo apt install libmosquitto-dev
 
 # 板子交叉编译
-# 需要 arm-linux-gnueabihf 工具链
+# 需要 100ask arm-buildroot-linux-gnueabihf 工具链
 ```
 
 ### PC 模拟器
@@ -164,7 +164,7 @@ sensefusion-panel/
 - [x] MQTT 异步发布（-DMQTT=ON，libmosquitto，主题前缀 `sensefusion/`）
 - [x] ADXL345 异常检测告警横幅（5 秒自动消失 / 触摸提前 dismiss）
 - [x] IR 遥控 Tab 切换（KEY_LEFT/KEY_RIGHT）
-- [x] Cortex-A7 交叉编译 toolchain 骨架
+- [x] Cortex-A7 交叉编译 toolchain（Buildroot SDK，已可编译）
 - [ ] 板子传感器驱动（sensors/ 各 `#else` 分支，TODO）
 - [ ] LVGL framebuffer HAL（替换 SDL2，TODO）
 - [ ] CJK 字体（中文暂显示为方块）

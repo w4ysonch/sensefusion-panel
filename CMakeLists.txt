@@ -15,6 +15,9 @@ endif()
 # ── 构建选项 ───────────────────────────────────────────────────────────────
 # PC 模拟器（SDL2 窗口）：cmake -DSIMULATOR=ON ..
 option(SIMULATOR "Build for PC simulator with SDL2" OFF)
+if(SIMULATOR)
+    add_compile_definitions(SIMULATOR=1)
+endif()
 
 # AddressSanitizer + UBSan：cmake -DASAN=ON ..
 option(ASAN "Enable AddressSanitizer and UBSanitizer" OFF)
@@ -73,9 +76,6 @@ target_include_directories(sensefusion-panel PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite3
 )
 
-target_compile_definitions(sensefusion-panel PRIVATE
-    $<$<BOOL:${SIMULATOR}>:SIMULATOR=1>
-)
 
 # ── SQLite3（自带 amalgamation，无需系统 libsqlite3）──────────────────────
 # third_party/sqlite3/sqlite3.c + sqlite3.h 直接参与编译；
