@@ -10,6 +10,9 @@
 #ifdef SIMULATOR
 #include "../sim/lv_drv_sdl.h"
 #else
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <linux/kd.h>
 #include "lvgl/drivers/display/lv_linux_fbdev.h"
 #endif
 
@@ -382,6 +385,13 @@ void dashboard_init(void)
     lv_init();
     lv_display_t *disp = lv_linux_fbdev_create();
     lv_linux_fbdev_set_file(disp, "/dev/fb0");
+
+    /* 禁用 VT 息屏（consoleblank=600 会导致 10 分钟黑屏） */
+    int tty_fd = open("/dev/console", O_RDWR);
+    if (tty_fd >= 0) {
+        ioctl(tty_fd, KDSETMODE, KD_GRAPHICS);
+        close(tty_fd);
+    }
     printf("[dashboard] FBDEV /dev/fb0 初始化完成\n");
 #endif
     build_ui();
