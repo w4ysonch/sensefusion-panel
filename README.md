@@ -2,7 +2,7 @@
 
 **多模态传感融合边缘终端** — 基于 IMX6ULL Linux 的嵌入式感知系统。
 
-自研 [embedmq](https://github.com/w4ysonch/embedmq) 消息总线将 5 路异构传感器、算法层、SQLite 持久化、MQTT 上报与 LVGL 可视化解耦串联，在 800×480 触摸屏上提供实时数据总览、历史趋势图表与远程监控能力。
+自研 [embedmq](https://github.com/w4ysonch/embedmq) 消息总线将 5 路异构传感器、算法层、SQLite 持久化、MQTT 上报与 LVGL 可视化解耦串联，在 1024×600 触摸屏上提供实时数据总览、历史趋势图表与远程监控能力。
 
 ## 硬件
 
