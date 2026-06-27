@@ -157,7 +157,7 @@ sensefusion-panel/
 
 **Phase 3 完成，模拟器完整可运行：**
 
-- [x] 三 Tab UI（总览 / 趋势 / 设置），深色主题 800×480
+- [x] 三 Tab UI（总览 / 趋势 / 设置），深色主题 1024×600
 - [x] 5 路传感器模拟器随机游走数据，实时驱动所有图表
 - [x] 趋势页 5 个 lv_chart 折线图（60 点滚动窗口）
 - [x] SQLite WAL 持久化，sqlite3 amalgamation 内嵌，交叉编译无额外依赖

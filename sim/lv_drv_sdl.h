@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 /* 初始化 SDL2 显示和输入驱动，返回 display 对象
- * w/h 为窗口像素尺寸，与板子分辨率保持一致（800x480）*/
+ * w/h 为窗口像素尺寸，与板子分辨率保持一致（1024x600）*/
 lv_display_t *sdl_hal_init(int32_t w, int32_t h);
 
 #ifdef __cplusplus

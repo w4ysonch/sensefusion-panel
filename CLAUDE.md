@@ -5,7 +5,7 @@ Context file for AI coding assistants (Claude Code, Cursor, etc.).
 ## Project Overview
 
 **sensefusion-panel** is a multi-sensor fusion display terminal running on an IMX6ULL Linux board.
-5 sensor acquisition threads → embedmq message bus → LVGL 800×480 dark-theme Dashboard.
+5 sensor acquisition threads → embedmq message bus → LVGL 1024×600 dark-theme Dashboard.
 
 
 ---

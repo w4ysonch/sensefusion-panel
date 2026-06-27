@@ -505,8 +505,13 @@
 #define LV_USE_ASSERT_NULL          1   /**< Check if the parameter is NULL. (Very fast, recommended) */
 #define LV_USE_ASSERT_MALLOC        1   /**< Checks is the memory is successfully allocated or no. (Very fast, recommended) */
 #define LV_USE_ASSERT_STYLE         1
+#ifdef SIMULATOR
 #define LV_USE_ASSERT_MEM_INTEGRITY 1
 #define LV_USE_ASSERT_OBJ           1
+#else
+#define LV_USE_ASSERT_MEM_INTEGRITY 0
+#define LV_USE_ASSERT_OBJ           0
+#endif
 
 /** Add a custom handler when assert happens e.g. to restart MCU. */
 #define LV_ASSERT_HANDLER_INCLUDE <stdint.h>

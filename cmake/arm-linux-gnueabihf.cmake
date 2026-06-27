@@ -5,6 +5,9 @@
 #
 # 前提：100ask arm-buildroot-linux-gnueabihf 工具链已位于 PATH
 
+# 交叉编译强制关闭模拟器，避免缓存污染导致误开
+set(SIMULATOR OFF CACHE BOOL "Force off for cross-compile" FORCE)
+
 set(CMAKE_SYSTEM_NAME      Linux)
 set(CMAKE_SYSTEM_PROCESSOR arm)
 

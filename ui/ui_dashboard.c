@@ -206,54 +206,54 @@ static void set_tabview_tab_font(lv_obj_t *tabview, const lv_font_t *font)
 /* 总览 Tab — 沿用原有卡片布局，y 坐标相对于 tab 内容区 */
 static void build_tab_overview(lv_obj_t *tab)
 {
-    /* 第一行（y=8，高 185）*/
-    lv_obj_t *card_dht = create_card(tab, "温湿度  DHT11",  8,   8, 185, 185);
-    g_label_temp     = create_value_label(card_dht, "--.-°C",    24);
-    g_label_humidity = create_sub_label  (card_dht, "--.- %RH",  62);
+    /* 第一行（y=8，h=250）*/
+    lv_obj_t *card_dht = create_card(tab, "温湿度  DHT11",  8,   8, 240, 250);
+    g_label_temp     = create_value_label(card_dht, "--.-°C",    28);
+    g_label_humidity = create_sub_label  (card_dht, "--.- %RH",  72);
 
-    lv_obj_t *card_comfort = create_card(tab, "体感舒适度", 201,  8, 185, 185);
-    g_label_comfort_val = create_value_label(card_comfort, "---",        24);
-    g_label_comfort_hi  = create_sub_label  (card_comfort, "HI: --.-°C", 62);
+    lv_obj_t *card_comfort = create_card(tab, "体感舒适度", 256,  8, 240, 250);
+    g_label_comfort_val = create_value_label(card_comfort, "---",        28);
+    g_label_comfort_hi  = create_sub_label  (card_comfort, "HI: --.-°C", 72);
 
-    lv_obj_t *card_pir = create_card(tab, "人体感应  SR501", 394,  8, 185, 185);
-    g_label_pir = create_value_label(card_pir, "---", 24);
+    lv_obj_t *card_pir = create_card(tab, "人体感应  SR501", 504,  8, 240, 250);
+    g_label_pir = create_value_label(card_pir, "---", 28);
 
-    lv_obj_t *card_dist = create_card(tab, "距离  SR04", 587,  8, 205, 185);
-    g_label_dist = create_value_label(card_dist, "-- cm", 24);
+    lv_obj_t *card_dist = create_card(tab, "距离  SR04", 752,  8, 256, 250);
+    g_label_dist = create_value_label(card_dist, "-- cm", 28);
 
-    /* 第二行（y=201，高 185）*/
+    /* 第二行（y=266，h=250）*/
     lv_obj_t *card_accel = create_card(tab, "三轴加速度  ADXL345",
-                                        8, 201, 570, 185);
+                                        8, 266, 740, 250);
     g_label_accel = create_sub_label(card_accel,
-        "X: --.--g   Y: --.--g   Z: --.--g   |a|: --.--g", 28);
+        "X: --.--g   Y: --.--g   Z: --.--g   |a|: --.--g", 32);
 
-    lv_obj_t *card_light = create_card(tab, "光照", 586, 201, 206, 185);
-    g_label_lux = create_value_label(card_light, "---- lux", 24);
+    lv_obj_t *card_light = create_card(tab, "光照", 756, 266, 252, 250);
+    g_label_lux = create_value_label(card_light, "---- lux", 28);
 }
 
 /* 趋势 Tab — 5 个 lv_chart（×10 整数化） */
 static void build_tab_trend(lv_obj_t *tab)
 {
-    /* 行 1 (y=8, h=195)：温度 / 湿度 / 距离 */
+    /* 行 1 (y=8, h=260)：温度 / 湿度 / 距离 */
     g_chart_temp = create_chart(tab, "温度 °C",
-        8,   8, 248, 195,   0, 500,   /* 0.0 ~ 50.0 °C，×10 */
+        8,   8, 325, 260,   0, 500,   /* 0.0 ~ 50.0 °C，×10 */
         lv_palette_main(LV_PALETTE_RED), &g_ser_temp);
 
     g_chart_humi = create_chart(tab, "湿度 %RH",
-        264, 8, 248, 195,   0, 1000,  /* 0.0 ~ 100.0 % */
+        341, 8, 325, 260,   0, 1000,  /* 0.0 ~ 100.0 % */
         lv_palette_main(LV_PALETTE_BLUE), &g_ser_humi);
 
     g_chart_dist = create_chart(tab, "距离 cm",
-        520, 8, 272, 195,   0, 3000,  /* 0 ~ 300 cm */
+        674, 8, 334, 260,   0, 3000,  /* 0 ~ 300 cm */
         lv_palette_main(LV_PALETTE_GREEN), &g_ser_dist);
 
-    /* 行 2 (y=211, h=195)：光照 / 加速度幅值 */
+    /* 行 2 (y=276, h=260)：光照 / 加速度幅值 */
     g_chart_lux = create_chart(tab, "光照 lux",
-        8,   211, 384, 195,  0, 1000,
+        8,   276, 496, 260,  0, 1000,
         lv_palette_main(LV_PALETTE_YELLOW), &g_ser_lux);
 
     g_chart_amag = create_chart(tab, "加速度幅值 (×100 g)",
-        400, 211, 392, 195,  0, 300,   /* 0 ~ 3.0 g，×100 */
+        512, 276, 496, 260,  0, 300,   /* 0 ~ 3.0 g，×100 */
         lv_palette_main(LV_PALETTE_PURPLE), &g_ser_amag);
 }
 
@@ -261,7 +261,7 @@ static void build_tab_trend(lv_obj_t *tab)
 static void build_tab_settings(lv_obj_t *tab)
 {
     /* MQTT 状态卡 */
-    lv_obj_t *card_mqtt = create_card(tab, "MQTT", 8, 8, 380, 130);
+    lv_obj_t *card_mqtt = create_card(tab, "MQTT", 8, 8, 496, 160);
     create_sub_label(card_mqtt, "主题前缀: " MQTT_TOPIC_PREFIX, 28);
     create_sub_label(card_mqtt, "Broker: mqtt_init() 传入地址", 52);
     g_label_mqtt_val = lv_label_create(card_mqtt);
@@ -271,7 +271,7 @@ static void build_tab_settings(lv_obj_t *tab)
     lv_obj_align(g_label_mqtt_val, LV_ALIGN_TOP_LEFT, 0, 76);
 
     /* DB 状态卡 */
-    lv_obj_t *card_db = create_card(tab, "SQLite 数据库", 396, 8, 396, 130);
+    lv_obj_t *card_db = create_card(tab, "SQLite 数据库", 512, 8, 496, 160);
 #ifdef SIMULATOR
     create_sub_label(card_db, "路径: ./sensefusion.db", 28);
 #else
@@ -285,7 +285,7 @@ static void build_tab_settings(lv_obj_t *tab)
     lv_obj_align(g_label_db_val, LV_ALIGN_TOP_LEFT, 0, 76);
 
     /* IR 遥控说明 */
-    lv_obj_t *card_ir = create_card(tab, "红外遥控", 8, 146, 784, 90);
+    lv_obj_t *card_ir = create_card(tab, "红外遥控", 8, 176, 1008, 100);
     create_sub_label(card_ir,
         "KEY_LEFT / KEY_RIGHT  —  切换 Tab（总览 / 趋势 / 设置）", 28);
     create_sub_label(card_ir,
@@ -301,7 +301,7 @@ static void build_ui(void)
 
     /* ── TabView（全屏） ── */
     g_tabview = lv_tabview_create(scr);
-    lv_obj_set_size(g_tabview, 800, 480);
+    lv_obj_set_size(g_tabview, 1024, 600);
     lv_obj_set_pos(g_tabview, 0, 0);
     lv_tabview_set_tab_bar_position(g_tabview, LV_DIR_TOP);
     lv_tabview_set_tab_bar_size(g_tabview, 44);
@@ -337,8 +337,8 @@ static void build_ui(void)
 
     /* ── 告警横幅：screen 直接子对象，渲染在 tabview 之上 ── */
     g_panel_alert = lv_obj_create(scr);
-    lv_obj_set_pos(g_panel_alert, 8, 420);
-    lv_obj_set_size(g_panel_alert, 784, 52);
+    lv_obj_set_pos(g_panel_alert, 8, 540);
+    lv_obj_set_size(g_panel_alert, 1008, 52);
     lv_obj_set_style_bg_color(g_panel_alert, CLR_RED, 0);
     lv_obj_set_style_bg_opa(g_panel_alert, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(g_panel_alert, 0, 0);
@@ -376,7 +376,7 @@ void dashboard_init(void)
 {
 #ifdef SIMULATOR
     lv_init();
-    sdl_hal_init(800, 480);
+    sdl_hal_init(1024, 600);
     printf("[dashboard] SDL2 模拟器初始化完成\n");
 #else
     lv_init();

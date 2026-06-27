@@ -33,6 +33,8 @@ add_subdirectory(third_party/embedmq)
 # LVGL v9 cmake 通过此变量定位 lv_conf.h。
 set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
     CACHE PATH "Directory containing lv_conf.h" FORCE)
+set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(CONFIG_LV_BUILD_DEMOS   OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/lvgl)
 
 # ── Sources ────────────────────────────────────────────────────────────────
