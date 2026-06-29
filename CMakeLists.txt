@@ -54,6 +54,7 @@ set(SOURCES
     ui/ui_dashboard.c
     storage/eeprom.c
     storage/db.c
+    storage/settings.c
     network/mqtt_client.c
     third_party/sqlite3/sqlite3.c
     fonts/lv_font_sf_sc_14.c

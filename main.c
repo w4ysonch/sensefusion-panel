@@ -13,7 +13,9 @@
 #include "input/input_ir.h"
 #include "ui/ui_dashboard.h"
 #include "storage/db.h"
+#include "storage/settings.h"
 #include "network/mqtt_client.h"
+#include "algo/anomaly.h"
 #include "lvgl/lvgl.h"
 
 #ifdef SIMULATOR
@@ -45,6 +47,11 @@ int main(void)
         return 1;
     }
 
+    /* 加载持久化配置（EEPROM，板子上生效；模拟器下读取失败用默认值） */
+    app_settings_t settings;
+    settings_load(&settings);
+    algo_anomaly_set_threshold(settings.anomaly_threshold);
+
     /* SQLite 数据库 */
     if (db_init(DB_PATH) != 0)
         fprintf(stderr, "[main] 数据库初始化失败，将无 SQLite 日志\n");
@@ -54,7 +61,7 @@ int main(void)
         fprintf(stderr, "[main] MQTT 初始化失败，将无网络上报\n");
 
     /* LVGL + 界面初始化 */
-    dashboard_init();
+    dashboard_init(&settings);
 
     /* 启动 7 个传感器/输入线程 */
     pthread_t threads[7];

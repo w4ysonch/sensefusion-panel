@@ -79,7 +79,7 @@ void ui_on_anomaly(const void *payload, size_t size, void *ctx)
     (void)ctx;
     if (size < sizeof(evt_anomaly_t)) return;
     const evt_anomaly_t *ev = (const evt_anomaly_t *)payload;
-    dashboard_show_alert(ev->type, ev->magnitude);
+    dashboard_show_alert(ev->magnitude);
     db_log_anomaly(ev->type, ev->magnitude);
     mqtt_publish_anomaly(ev->type, ev->magnitude);
 }

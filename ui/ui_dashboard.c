@@ -438,8 +438,9 @@ static void build_tab_settings(lv_obj_t *tab)
 }
 
 /* ── 主界面构建入口 ───────────────────────────────────────── */
-static void build_ui(void)
+static void build_ui(const app_settings_t *settings)
 {
+    (void)settings;  /* 预留：后续设置页控件用到 */
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, CLR_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -522,7 +523,7 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
 
 /* ── 公开接口 ────────────────────────────────────────────── */
 
-void dashboard_init(void)
+void dashboard_init(const app_settings_t *settings)
 {
 #ifdef SIMULATOR
     lv_init();
@@ -541,7 +542,7 @@ void dashboard_init(void)
     }
     printf("[dashboard] FBDEV /dev/fb0 初始化完成\n");
 #endif
-    build_ui();
+    build_ui(settings);
 
 #ifndef SIMULATOR
     /* 注册触摸 indev，让 LVGL 原生处理点击/滑动 */
@@ -607,9 +608,8 @@ void dashboard_update_comfort(float heat_index, comfort_level_t level)
     pthread_mutex_unlock(&g_mutex);
 }
 
-void dashboard_show_alert(uint8_t type, float magnitude)
+void dashboard_show_alert(float magnitude)
 {
-    (void)type;
     pthread_mutex_lock(&g_mutex);
     g_cache.anomaly_mag   = magnitude;
     g_cache.anomaly_dirty = true;

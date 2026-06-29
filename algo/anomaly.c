@@ -13,11 +13,18 @@ static float history[HISTORY_LEN];
 static int   history_idx   = 0;
 static int   history_count = 0;  /* 已填入样本数，< HISTORY_LEN 时为预热期 */
 
+static float s_threshold = MAGNITUDE_THRESHOLD;
+
 static float moving_average(void)
 {
     float sum = 0.0f;
     for (int i = 0; i < HISTORY_LEN; i++) sum += history[i];
     return sum / HISTORY_LEN;
+}
+
+void algo_anomaly_set_threshold(float threshold)
+{
+    s_threshold = threshold;
 }
 
 void algo_anomaly_on_adxl345(const void *payload, size_t size, void *ctx)
@@ -43,7 +50,7 @@ void algo_anomaly_on_adxl345(const void *payload, size_t size, void *ctx)
     history[history_idx] = raw->magnitude;
     history_idx = (history_idx + 1) % HISTORY_LEN;
 
-    if (dev > MAGNITUDE_THRESHOLD) {
+    if (dev > s_threshold) {
         evt_anomaly_t ev;
         ev.type      = ANOMALY_TYPE_VIBRATION;
         ev.magnitude = dev;
