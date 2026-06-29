@@ -26,9 +26,9 @@ static float s_az = 1.0f;
 
 static int read_adxl345(float *x, float *y, float *z)
 {
-    /* 5% 概率触发冲击峰值，用于测试告警横幅 */
+    /* 0.5% 概率触发冲击峰值（约每 20s 一次），用于测试告警横幅 */
     float spike = (float)rand_r(&g_seed) / (float)RAND_MAX;
-    if (spike < 0.05f) {
+    if (spike < 0.005f) {
         float dir = (float)rand_r(&g_seed) / (float)RAND_MAX * 2.0f - 1.0f;
         *x = dir * 2.5f;
         *y = ((float)rand_r(&g_seed) / (float)RAND_MAX * 2.0f - 1.0f) * 2.5f;

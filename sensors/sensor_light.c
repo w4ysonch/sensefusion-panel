@@ -75,6 +75,8 @@ static int read_light(uint16_t *lux)
 
     if (ioctl(fd, I2C_RDWR, &rdwr) != 2) {
         perror("[light] read");
+        close(fd);
+        fd = -1;  /* 下次调用重新初始化 */
         return -1;
     }
 

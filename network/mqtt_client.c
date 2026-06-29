@@ -63,8 +63,8 @@ int mqtt_init(const char *host, int port, const char *client_id)
 void mqtt_deinit(void)
 {
     if (s_mosq) {
-        mosquitto_loop_stop(s_mosq, true);
         mosquitto_disconnect(s_mosq);
+        mosquitto_loop_stop(s_mosq, true);
         mosquitto_destroy(s_mosq);
         s_mosq   = NULL;
         s_status = "已关闭";

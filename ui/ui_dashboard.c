@@ -50,6 +50,7 @@ typedef struct {
     bool comfort_dirty;
     bool anomaly_dirty;
     bool touch_dirty;
+    bool ir_dirty;
 
     float    temp, humidity;
     float    ax, ay, az, amag;
@@ -61,6 +62,7 @@ typedef struct {
     float    anomaly_mag;
     int32_t  touch_x, touch_y;
     uint8_t  touch_pressed;
+    int32_t  ir_key;
 } sensor_cache_t;
 
 static sensor_cache_t  g_cache = {0};
@@ -511,6 +513,8 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
     data->point.y = g_cache.touch_y;
     data->state   = g_cache.touch_pressed ? LV_INDEV_STATE_PRESSED
                                           : LV_INDEV_STATE_RELEASED;
+    /* 读完即消费：LVGL 下次轮询看到 RELEASED，避免单次点击误判为长按 */
+    g_cache.touch_pressed = 0;
     pthread_mutex_unlock(&g_mutex);
 }
 
@@ -630,11 +634,9 @@ void dashboard_update_touch(int32_t x, int32_t y, uint8_t pressed)
 void dashboard_handle_ir_key(uint16_t key_code)
 {
     if (key_code == IR_KEY_LEFT || key_code == IR_KEY_RIGHT) {
-        /* 需要在主线程操作 LVGL，借用 touch_dirty 触发 tick 内切换 */
         pthread_mutex_lock(&g_mutex);
-        /* 用负值区分 IR 切换（touch x 通常为正） */
-        g_cache.touch_x    = (key_code == IR_KEY_RIGHT) ? -2 : -1;
-        g_cache.touch_dirty = true;
+        g_cache.ir_key   = (int32_t)key_code;
+        g_cache.ir_dirty = true;
         pthread_mutex_unlock(&g_mutex);
     } else {
         printf("[dashboard] IR key=0x%04x\n", key_code);
@@ -661,6 +663,7 @@ uint32_t dashboard_tick(void)
     g_cache.comfort_dirty = false;
     g_cache.anomaly_dirty = false;
     g_cache.touch_dirty   = false;
+    g_cache.ir_dirty      = false;
     pthread_mutex_unlock(&g_mutex);
 
     /* ── 总览 Tab 更新 ── */
@@ -720,20 +723,17 @@ uint32_t dashboard_tick(void)
         alert_ticks = ALERT_AUTO_HIDE_TICKS;
     }
 
-    if (local.touch_dirty) {
-        if (local.touch_x == -1 || local.touch_x == -2) {
-            /* IR 遥控切换 Tab */
-            uint32_t cur = lv_tabview_get_tab_active(g_tabview);
-            uint32_t next;
-            if (local.touch_x == -2)   /* KEY_RIGHT */
-                next = (cur + 1) % 3;
-            else                        /* KEY_LEFT */
-                next = (cur + 3 - 1) % 3;
-            lv_tabview_set_active(g_tabview, next, LV_ANIM_ON);
-        } else if (alert_ticks > 0) {
-            /* 触摸提前 dismiss 告警 */
-            alert_ticks = 1;
-        }
+    if (local.ir_dirty) {
+        uint32_t cur  = lv_tabview_get_tab_active(g_tabview);
+        uint32_t next = (local.ir_key == IR_KEY_RIGHT)
+                        ? (cur + 1) % 3
+                        : (cur + 3 - 1) % 3;
+        lv_tabview_set_active(g_tabview, next, LV_ANIM_ON);
+    }
+
+    if (local.touch_dirty && alert_ticks > 0) {
+        /* 触摸提前 dismiss 告警 */
+        alert_ticks = 1;
     }
 
     if (alert_ticks > 0) {
