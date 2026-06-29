@@ -76,8 +76,7 @@ sudo apt install cmake gcc g++ libsdl2-dev
 # 可选：MQTT 支持
 sudo apt install libmosquitto-dev
 
-# 板子交叉编译
-# 需要 100ask arm-buildroot-linux-gnueabihf 工具链
+# 板子交叉编译：需要 100ask arm-buildroot-linux-gnueabihf 工具链
 ```
 
 ### PC 模拟器
@@ -87,9 +86,9 @@ git clone --recurse-submodules https://github.com/w4ysonch/sensefusion-panel.git
 cd sensefusion-panel
 mkdir build && cd build
 
-cmake .. -DSIMULATOR=ON                        # 基础模式
-cmake .. -DSIMULATOR=ON -DMQTT=ON              # 启用 MQTT 发布
-cmake .. -DSIMULATOR=ON -DASAN=ON              # 启用 AddressSanitizer
+cmake .. -DSIMULATOR=ON                   # 基础模式
+cmake .. -DSIMULATOR=ON -DMQTT=ON         # 启用 MQTT 发布
+cmake .. -DSIMULATOR=ON -DASAN=ON         # 启用 AddressSanitizer
 
 make -j$(nproc)
 ./sensefusion-panel
@@ -115,19 +114,20 @@ sensefusion-panel/
 ├── sensors/                5 路传感器采集线程（板子驱动 TODO，simulator 随机游走）
 ├── input/                  触摸屏（MT-B）与红外遥控输入线程
 ├── algo/
-│   ├── comfort_index.c/h   Steadman 热指数 → 5 级舒适度
-│   └── anomaly.c/h         ADXL345 滑动窗口（8 样本）异常检测
+│   ├── comfort_index.c/h   Steadman 热指数 -> 5 级舒适度
+│   └── anomaly.c/h         ADXL345 滑动窗口（8 样本）异常检测，阈值可运行时调整
 ├── ui/
 │   ├── ui_handlers.c/h     embedmq 回调：更新缓存 + 触发算法 + db/mqtt
-│   └── ui_dashboard.c/h    LVGL 三 Tab UI、sensor_cache_t、dashboard_tick()
+│   └── ui_dashboard.c/h    LVGL 四 Tab UI、sensor_cache_t、dashboard_tick()
 ├── storage/
 │   ├── db.c/h              SQLite WAL 日志（每次传感器更新写入）
-│   └── eeprom.c/h          I2C EEPROM 持久化（TODO）
+│   ├── eeprom.c/h          AT24Cxx I2C EEPROM 驱动（页对齐写入，5ms 延迟）
+│   └── settings.c/h        持久化配置（亮度/温度单位/静音/异常阈值，魔数校验）
 ├── network/
 │   └── mqtt_client.c/h     libmosquitto 异步发布，-DMQTT=ON 启用
 ├── sim/
 │   └── lv_drv_sdl.c/h      PC 模拟器 SDL2 HAL（#ifdef SIMULATOR）
-├── fonts/                  LVGL 自定义字体（CJK 待生成）
+├── fonts/                  LVGL 自定义 CJK 字体（gen_font.sh 扫源码自动生成）
 ├── third_party/
 │   ├── embedmq/            消息总线（git submodule）
 │   ├── lvgl/               LVGL v9（git submodule）
@@ -155,20 +155,23 @@ sensefusion-panel/
 
 ## 当前状态
 
-**Phase 3 完成，模拟器完整可运行：**
+**Phase 4 完成，模拟器完整可运行，交叉编译就绪：**
 
-- [x] 三 Tab UI（总览 / 趋势 / 设置），深色主题 1024×600
+- [x] 四 Tab UI（总览 / 趋势 / 设置 / 系统），深色主题 1024×600
 - [x] 5 路传感器模拟器随机游走数据，实时驱动所有图表
-- [x] 趋势页 5 个 lv_chart 折线图（60 点滚动窗口）
+- [x] 趋势页 5 个 lv_chart 折线图（60 点滚动窗口），点击全屏查看
 - [x] SQLite WAL 持久化，sqlite3 amalgamation 内嵌，交叉编译无额外依赖
 - [x] MQTT 异步发布（-DMQTT=ON，libmosquitto，主题前缀 `sensefusion/`）
 - [x] ADXL345 异常检测告警横幅（5 秒自动消失 / 触摸提前 dismiss）
-- [x] IR 遥控 Tab 切换（KEY_LEFT/KEY_RIGHT）
-- [x] Cortex-A7 交叉编译 toolchain（Buildroot SDK，已可编译）
-- [ ] 板子传感器驱动（sensors/ 各 `#else` 分支，TODO）
-- [ ] LVGL framebuffer HAL（替换 SDL2，TODO）
-- [ ] CJK 字体（中文暂显示为方块）
-- [ ] EEPROM 基线存储
+- [x] IR 遥控 Tab 循环切换（KEY_LEFT/KEY_RIGHT，独立 ir_dirty 通道）
+- [x] LVGL framebuffer HAL（/dev/fb0 + 触摸 indev，板子直接可用）
+- [x] Cortex-A7 交叉编译 toolchain（Buildroot SDK）
+- [x] CJK 字体（gen_font.sh 扫源码自动提取汉字，lv_font_conv 生成）
+- [x] EEPROM 持久化配置（AT24Cxx，魔数校验，首次启动写默认值）
+- [x] 设置页交互控件（亮度/温度单位/静音/异常阈值，改动实时写 EEPROM）
+- [x] 系统页（CPU/内存/运行时间，数据库清理按钮）
+- [ ] 板子传感器驱动（sensors/ 各 `#else` 分支，需硬件）
+- [ ] EEPROM / backlight sysfs 路径上板确认
 
 ## License
 
