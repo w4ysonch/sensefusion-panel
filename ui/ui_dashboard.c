@@ -16,6 +16,7 @@
 #include "lvgl/drivers/display/lv_linux_fbdev.h"
 #endif
 
+#include "lvgl/src/widgets/chart/lv_chart_private.h"
 LV_FONT_DECLARE(lv_font_sf_sc_14);
 LV_FONT_DECLARE(lv_font_sf_sc_16);
 LV_FONT_DECLARE(lv_font_sf_sc_28);
@@ -93,6 +94,15 @@ static lv_chart_series_t  *g_ser_amag;
 static lv_obj_t *g_label_mqtt_val;
 static lv_obj_t *g_label_db_val;
 
+/* 趋势 Tab — 每个图表卡片（card 对象）*/
+static lv_obj_t *g_trend_cards[5];  /* 对应 temp/humi/dist/lux/amag */
+
+/* 全屏详情层 */
+static lv_obj_t          *g_detail_panel;
+static lv_obj_t          *g_detail_chart;
+static lv_chart_series_t *g_detail_ser;
+static lv_obj_t          *g_detail_title;
+
 /* 告警横幅（浮动在屏幕最上层） */
 static lv_obj_t *g_panel_alert;
 static lv_obj_t *g_label_alert;
@@ -149,12 +159,13 @@ static lv_obj_t *create_sub_label(lv_obj_t *card, const char *text, int32_t y)
     return lbl;
 }
 
-/* 创建带标题的趋势折线图 */
+/* 创建带标题的趋势折线图，返回外层 card 对象 */
 static lv_obj_t *create_chart(lv_obj_t *parent, const char *title,
                                int32_t x, int32_t y, int32_t w, int32_t h,
                                int32_t y_min, int32_t y_max,
                                lv_color_t color,
-                               lv_chart_series_t **ser_out)
+                               lv_chart_series_t **ser_out,
+                               lv_obj_t **chart_out)
 {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_pos(card, x, y);
@@ -179,20 +190,24 @@ static lv_obj_t *create_chart(lv_obj_t *parent, const char *title,
     lv_obj_set_style_bg_opa(chart, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(chart, CLR_BORDER, 0);
     lv_obj_set_style_border_width(chart, 1, 0);
-    /* 去掉默认的点标记，只显示折线 */
     lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR);
 
     lv_chart_series_t *ser = lv_chart_add_series(
         chart, color, LV_CHART_AXIS_PRIMARY_Y);
-    /* 填充初始值为图表中点，避免初始从 0 开始突变 */
     lv_chart_set_all_value(chart, ser, (y_min + y_max) / 2);
 
-    if (ser_out) *ser_out = ser;
-    return chart;
+    if (ser_out)   *ser_out   = ser;
+    if (chart_out) *chart_out = chart;
+
+    /* 子控件不拦截点击，事件冒泡到 card */
+    lv_obj_clear_flag(chart, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(lbl, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_add_flag(chart, LV_OBJ_FLAG_EVENT_BUBBLE);
+    return card;
 }
 
 /* LVGL v9 tabview tab bar 结构：lv_obj 容器 → lv_button → lv_label
- * label 不继承父控件 style，无公开 API 直接设置字体，只能遍历设置 */
+ * label 不继承父控件 style，无公开 API 直接设置字体/颜色，只能遍历设置 */
 static void set_tabview_tab_font(lv_obj_t *tabview, const lv_font_t *font)
 {
     lv_obj_t *bar = lv_tabview_get_tab_bar(tabview);
@@ -200,8 +215,111 @@ static void set_tabview_tab_font(lv_obj_t *tabview, const lv_font_t *font)
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t *btn = lv_obj_get_child(bar, (int32_t)i);
         lv_obj_t *lbl = lv_obj_get_child(btn, 0);
-        if (lbl) lv_obj_set_style_text_font(lbl, font, 0);
+        if (!lbl) continue;
+        lv_obj_set_style_text_font(lbl, font, 0);
+        /* 未选中：CLR_VALUE（亮白）；选中：CLR_TITLE（蓝色，LVGL 默认会覆盖） */
+        lv_obj_set_style_text_color(lbl, CLR_VALUE, 0);
+        lv_obj_set_style_text_color(lbl, CLR_TITLE, LV_STATE_CHECKED);
     }
+}
+
+/* ── 全屏详情层 ──────────────────────────────────────────── */
+
+/* 每个趋势卡片携带的元数据，用于点击时填充详情层 */
+typedef struct {
+    lv_obj_t          *src_chart;  /* 小图的 chart 对象 */
+    lv_chart_series_t *src_ser;
+    int32_t            y_min;
+    int32_t            y_max;
+    lv_color_t         color;
+    const char        *title;
+} chart_meta_t;
+
+/* 5 个图表的元数据，与 g_trend_cards[] 一一对应 */
+static chart_meta_t g_chart_meta[5];
+
+static void detail_close_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_obj_add_flag(g_detail_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void chart_card_click_cb(lv_event_t *e)
+{
+    chart_meta_t *meta = (chart_meta_t *)lv_event_get_user_data(e);
+
+    /* 更新详情层标题 */
+    lv_label_set_text(g_detail_title, meta->title);
+
+    /* 同步量程与颜色 */
+    lv_chart_set_range(g_detail_chart, LV_CHART_AXIS_PRIMARY_Y,
+                       meta->y_min, meta->y_max);
+    lv_chart_set_series_color(g_detail_chart, g_detail_ser, meta->color);
+
+    /* 共享小图的 y_points 数组，大图只读展示 */
+    lv_chart_set_series_ext_y_array(g_detail_chart, g_detail_ser,
+                                    meta->src_ser->y_points);
+    lv_chart_refresh(g_detail_chart);
+
+    lv_obj_clear_flag(g_detail_panel, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void build_detail_panel(lv_obj_t *scr)
+{
+    /* 全屏半透明遮罩 + 卡片 */
+    g_detail_panel = lv_obj_create(scr);
+    lv_obj_set_size(g_detail_panel, 1024, 600);
+    lv_obj_set_pos(g_detail_panel, 0, 0);
+    lv_obj_set_style_bg_color(g_detail_panel, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(g_detail_panel, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(g_detail_panel, 0, 0);
+    lv_obj_set_style_radius(g_detail_panel, 0, 0);
+    lv_obj_set_style_pad_all(g_detail_panel, 0, 0);
+    lv_obj_clear_flag(g_detail_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_detail_panel, LV_OBJ_FLAG_HIDDEN);
+
+    /* 内层卡片 */
+    lv_obj_t *card = lv_obj_create(g_detail_panel);
+    lv_obj_set_size(card, 960, 520);
+    lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
+    style_card(card);
+
+    /* 标题 */
+    g_detail_title = lv_label_create(card);
+    lv_label_set_text(g_detail_title, "");
+    lv_obj_set_style_text_color(g_detail_title, CLR_TITLE, 0);
+    lv_obj_set_style_text_font(g_detail_title, &lv_font_sf_sc_16, 0);
+    lv_obj_align(g_detail_title, LV_ALIGN_TOP_LEFT, 0, 0);
+
+    /* 关闭按钮 */
+    lv_obj_t *btn_close = lv_button_create(card);
+    lv_obj_set_size(btn_close, 60, 32);
+    lv_obj_align(btn_close, LV_ALIGN_TOP_RIGHT, 0, -4);
+    lv_obj_set_style_bg_color(btn_close, CLR_BORDER, 0);
+    lv_obj_set_style_bg_opa(btn_close, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(btn_close, 0, 0);
+    lv_obj_set_style_radius(btn_close, 6, 0);
+    lv_obj_add_event_cb(btn_close, detail_close_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *lbl_close = lv_label_create(btn_close);
+    lv_label_set_text(lbl_close, "关闭");
+    lv_obj_set_style_text_font(lbl_close, &lv_font_sf_sc_14, 0);
+    lv_obj_set_style_text_color(lbl_close, CLR_VALUE, 0);
+    lv_obj_center(lbl_close);
+
+    /* 大图表 */
+    g_detail_chart = lv_chart_create(card);
+    lv_obj_set_size(g_detail_chart, 912, 440);
+    lv_obj_align(g_detail_chart, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_chart_set_type(g_detail_chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(g_detail_chart, CHART_POINTS);
+    lv_obj_set_style_bg_color(g_detail_chart, CLR_CARD, 0);
+    lv_obj_set_style_bg_opa(g_detail_chart, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(g_detail_chart, CLR_BORDER, 0);
+    lv_obj_set_style_border_width(g_detail_chart, 1, 0);
+    lv_obj_set_style_size(g_detail_chart, 0, 0, LV_PART_INDICATOR);
+    g_detail_ser = lv_chart_add_series(g_detail_chart,
+                       lv_palette_main(LV_PALETTE_BLUE),
+                       LV_CHART_AXIS_PRIMARY_Y);
 }
 
 /* ── 各 Tab 构建 ─────────────────────────────────────────── */
@@ -234,30 +352,52 @@ static void build_tab_overview(lv_obj_t *tab)
     g_label_lux = create_value_label(card_light, "---- lux", 28);
 }
 
-/* 趋势 Tab — 5 个 lv_chart（×10 整数化） */
+/* 趋势 Tab — 5 个 lv_chart（×10 整数化），点击可全屏查看 */
 static void build_tab_trend(lv_obj_t *tab)
 {
-    /* 行 1 (y=8, h=260)：温度 / 湿度 / 距离 */
-    g_chart_temp = create_chart(tab, "温度 °C",
-        8,   8, 325, 260,   0, 500,   /* 0.0 ~ 50.0 °C，×10 */
-        lv_palette_main(LV_PALETTE_RED), &g_ser_temp);
+    /* 定义每个图表的参数 */
+    static const struct {
+        const char *title;
+        int32_t x, y, w, h;
+        int32_t y_min, y_max;
+        lv_palette_t palette;
+    } cfg[] = {
+        { "温度 °C",          8,   8, 325, 260,    0,  500, LV_PALETTE_RED    },
+        { "湿度 %RH",       341,   8, 325, 260,    0, 1000, LV_PALETTE_BLUE   },
+        { "距离 cm",         674,  8, 334, 260,    0, 3000, LV_PALETTE_GREEN  },
+        { "光照 lux",          8, 276, 496, 260,   0, 1000, LV_PALETTE_YELLOW },
+        { "加速度幅值 (×100 g)", 512, 276, 496, 260, 0,  300, LV_PALETTE_PURPLE },
+    };
 
-    g_chart_humi = create_chart(tab, "湿度 %RH",
-        341, 8, 325, 260,   0, 1000,  /* 0.0 ~ 100.0 % */
-        lv_palette_main(LV_PALETTE_BLUE), &g_ser_humi);
+    lv_chart_series_t **sers[] = {
+        &g_ser_temp, &g_ser_humi, &g_ser_dist, &g_ser_lux, &g_ser_amag
+    };
+    lv_obj_t **charts[] = {
+        &g_chart_temp, &g_chart_humi, &g_chart_dist, &g_chart_lux, &g_chart_amag
+    };
 
-    g_chart_dist = create_chart(tab, "距离 cm",
-        674, 8, 334, 260,   0, 3000,  /* 0 ~ 300 cm */
-        lv_palette_main(LV_PALETTE_GREEN), &g_ser_dist);
+    for (int i = 0; i < 5; i++) {
+        lv_color_t color = lv_palette_main(cfg[i].palette);
+        g_trend_cards[i] = create_chart(tab, cfg[i].title,
+            cfg[i].x, cfg[i].y, cfg[i].w, cfg[i].h,
+            cfg[i].y_min, cfg[i].y_max, color,
+            sers[i], charts[i]);
 
-    /* 行 2 (y=276, h=260)：光照 / 加速度幅值 */
-    g_chart_lux = create_chart(tab, "光照 lux",
-        8,   276, 496, 260,  0, 1000,
-        lv_palette_main(LV_PALETTE_YELLOW), &g_ser_lux);
+        /* 元数据 */
+        g_chart_meta[i] = (chart_meta_t){
+            .src_chart = *charts[i],
+            .src_ser   = *sers[i],
+            .y_min     = cfg[i].y_min,
+            .y_max     = cfg[i].y_max,
+            .color     = color,
+            .title     = cfg[i].title,
+        };
 
-    g_chart_amag = create_chart(tab, "加速度幅值 (×100 g)",
-        512, 276, 496, 260,  0, 300,   /* 0 ~ 3.0 g，×100 */
-        lv_palette_main(LV_PALETTE_PURPLE), &g_ser_amag);
+        /* 点击卡片打开全屏详情 */
+        lv_obj_add_flag(g_trend_cards[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(g_trend_cards[i], chart_card_click_cb,
+                            LV_EVENT_CLICKED, &g_chart_meta[i]);
+    }
 }
 
 /* 设置 Tab */
@@ -337,6 +477,9 @@ static void build_ui(void)
     build_tab_overview(tab_overview);
     build_tab_trend(tab_trend);
     build_tab_settings(tab_settings);
+
+    /* 全屏详情层（挂在 screen，渲染在 tabview 之上） */
+    build_detail_panel(scr);
 
     /* ── 告警横幅：screen 直接子对象，渲染在 tabview 之上 ── */
     g_panel_alert = lv_obj_create(scr);
