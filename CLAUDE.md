@@ -17,23 +17,28 @@ sensefusion-panel/
 ├── main.c                  Entry point, starts threads, drives LVGL main loop
 ├── app/
 │   ├── app_events.h        All event macros (EVT_*) and payload structs
-│   └── app_init.c/h        embedmq instance creation, 8 handler registrations, teardown
+│   └── app_init.c/h        embedmq instance creation, 9 handler registrations, teardown
 ├── sensors/                One thread per sensor; real drivers on board (currently TODO stubs)
 ├── input/                  Touchscreen (MT protocol B) and IR remote input event threads
 ├── algo/
 │   ├── comfort_index.c/h   Steadman heat index → 5-level comfort rating
-│   └── anomaly.c/h         ADXL345 sliding-window (8 samples) anomaly detection
+│   └── anomaly.c/h         ADXL345 sliding-window (8 samples) anomaly detection, runtime-adjustable threshold
 ├── ui/
 │   ├── ui_handlers.c/h     embedmq callbacks (ui_on_dht11, etc.)
 │   └── ui_dashboard.c/h    LVGL widgets, sensor_cache_t, dashboard_tick()
 ├── storage/
-│   └── eeprom.c/h          I2C EEPROM persistence (TODO)
+│   ├── db.c/h              SQLite WAL persistence (every sensor update)
+│   ├── eeprom.c/h          AT24Cxx I2C EEPROM driver (page-aligned writes, 5ms delay)
+│   └── settings.c/h        Persistent config (brightness/unit/mute/threshold, magic validation)
+├── network/
+│   └── mqtt_client.c/h     libmosquitto async publish, enabled with -DMQTT=ON
 ├── sim/
 │   └── lv_drv_sdl.c/h      PC simulator SDL2 HAL (guarded by #ifdef SIMULATOR)
-├── fonts/                  Custom LVGL font .c files (empty — CJK font pending)
+├── fonts/                  Custom LVGL CJK font .c files (gen_font.sh auto-generates from source)
 ├── third_party/
 │   ├── embedmq/            git submodule
 │   ├── lvgl/               git submodule (LVGL v9)
+│   ├── sqlite3/            SQLite amalgamation (embedded, no system dep)
 │   └── lv_conf.h           LVGL config — LV_BUILD_CONF_DIR in CMakeLists.txt points here
 └── cmake/                  Cross-compile toolchain (arm-linux-gnueabihf.cmake)
 ```
@@ -88,7 +93,7 @@ Second parameter is `size_t`, not `uint16_t`.
 | `EVT_SENSOR_SR04` | `evt_sr04_t` { distance_cm } | sensor_sr04 |
 | `EVT_SENSOR_LIGHT` | `evt_light_t` { lux } | sensor_light |
 | `EVT_ALGO_COMFORT` | `evt_comfort_t` { heat_index, level } | algo/comfort_index |
-| `EVT_ALGO_ANOMALY` | `evt_anomaly_t` { type, magnitude } | algo/anomaly |
+| `EVT_ALERT_ANOMALY` | `evt_anomaly_t` { type, magnitude } | algo/anomaly |
 | `EVT_INPUT_TOUCH` | `evt_touch_t` { x, y } | input_touch |
 | `EVT_INPUT_IR` | `evt_ir_t` { key_code } | input_ir |
 
@@ -100,8 +105,8 @@ Second parameter is `size_t`, not `uint16_t`.
 # PC simulator
 mkdir build && cd build && cmake .. -DSIMULATOR=ON && make -j$(nproc)
 
-# Board (toolchain TODO)
-cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake
+# Board
+cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake && make -j$(nproc)
 ```
 
 After cloning: `git submodule update --init --recursive`
@@ -111,8 +116,4 @@ After cloning: `git submodule update --init --recursive`
 ## TODO
 
 - [ ] Sensor drivers: DHT11 char device, ADXL345 I2C, SR501/SR04 GPIO sysfs, light ADC sysfs
-- [ ] LVGL framebuffer HAL (replace SDL2 sim/ backend)
-- [ ] CJK font: generate .c with lv_font_conv from Source Han Sans, place in fonts/
-- [ ] EEPROM: implement I2C read/write in storage/eeprom.c
-- [ ] Cross-compile: cmake/arm-linux-gnueabihf.cmake
-- [ ] Simulator animation: #ifdef SIMULATOR random-walk sensor values for demo
+- [ ] Confirm EEPROM device node (/dev/i2c-?) and backlight sysfs path on board
