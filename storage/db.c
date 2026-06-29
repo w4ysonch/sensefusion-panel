@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <time.h>
+#include <stdint.h>
 #include <sqlite3.h>
 #include "db.h"
 
@@ -98,4 +99,16 @@ void db_cleanup_old(int keep_days)
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
     sqlite3_exec(s_db, "PRAGMA wal_checkpoint(TRUNCATE);", NULL, NULL, NULL);
+}
+
+int64_t db_count(void)
+{
+    if (!s_db) return -1;
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(s_db, "SELECT COUNT(*) FROM readings;",
+                           -1, &stmt, NULL) != SQLITE_OK) return -1;
+    int64_t n = (sqlite3_step(stmt) == SQLITE_ROW)
+                ? sqlite3_column_int64(stmt, 0) : -1;
+    sqlite3_finalize(stmt);
+    return n;
 }

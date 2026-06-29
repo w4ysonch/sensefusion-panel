@@ -22,4 +22,7 @@ void db_cleanup_old (int keep_days);
 /* 状态字符串，供 UI 展示 */
 const char *db_status_str(void);
 
+/* 返回 readings 表总行数，s_db 为 NULL 时返回 -1 */
+int64_t db_count(void);
+
 #endif /* STORAGE_DB_H */

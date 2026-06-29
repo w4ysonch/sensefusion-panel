@@ -5,7 +5,9 @@
 #include "ui_dashboard.h"
 #include "lvgl/lvgl.h"
 #include "../storage/db.h"
+#include "../storage/settings.h"
 #include "../network/mqtt_client.h"
+#include "../algo/anomaly.h"
 
 #ifdef SIMULATOR
 #include "../sim/lv_drv_sdl.h"
@@ -65,8 +67,9 @@ typedef struct {
     int32_t  ir_key;
 } sensor_cache_t;
 
-static sensor_cache_t  g_cache = {0};
-static pthread_mutex_t g_mutex = PTHREAD_MUTEX_INITIALIZER;
+static sensor_cache_t  g_cache    = {0};
+static pthread_mutex_t g_mutex    = PTHREAD_MUTEX_INITIALIZER;
+static app_settings_t  g_settings = {0};
 
 /* ── LVGL 控件指针 ───────────────────────────────────────── */
 
@@ -95,6 +98,12 @@ static lv_chart_series_t  *g_ser_amag;
 /* 设置 Tab */
 static lv_obj_t *g_label_mqtt_val;
 static lv_obj_t *g_label_db_val;
+static lv_obj_t *g_label_db_count;
+static lv_obj_t *g_label_sysinfo;
+static lv_obj_t *g_slider_brightness;
+static lv_obj_t *g_slider_threshold;
+static lv_obj_t *g_sw_unit;
+static lv_obj_t *g_sw_mute;
 
 /* 趋势 Tab — 每个图表卡片（card 对象）*/
 static lv_obj_t *g_trend_cards[5];  /* 对应 temp/humi/dist/lux/amag */
@@ -368,7 +377,7 @@ static void build_tab_trend(lv_obj_t *tab)
         { "湿度 %RH",       341,   8, 325, 260,    0, 1000, LV_PALETTE_BLUE   },
         { "距离 cm",         674,  8, 334, 260,    0, 3000, LV_PALETTE_GREEN  },
         { "光照 lux",          8, 276, 496, 260,   0, 1000, LV_PALETTE_YELLOW },
-        { "加速度幅值 (×100 g)", 512, 276, 496, 260, 0,  300, LV_PALETTE_PURPLE },
+        { "加速度幅值 (x100 g)", 512, 276, 496, 260, 0,  300, LV_PALETTE_PURPLE },
     };
 
     lv_chart_series_t **sers[] = {
@@ -402,45 +411,206 @@ static void build_tab_trend(lv_obj_t *tab)
     }
 }
 
+/* ── 设置控件回调（主线程，可直接调 LVGL 和 settings_save） ── */
+
+#ifndef SIMULATOR
+static void apply_brightness(uint8_t pct)
+{
+    /* 查找 /sys/class/backlight/*/brightness 写入 */
+    static const char *path = "/sys/class/backlight/backlight/brightness";
+    FILE *f = fopen(path, "w");
+    if (f) { fprintf(f, "%u\n", (unsigned)(pct * 255u / 100u)); fclose(f); }
+}
+#endif
+
+static void cb_brightness(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target(e);
+    g_settings.brightness = (uint8_t)lv_slider_get_value(sl);
+    settings_save(&g_settings);
+#ifndef SIMULATOR
+    apply_brightness(g_settings.brightness);
+#endif
+}
+
+static void cb_unit(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    g_settings.unit_fahrenheit = lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0;
+    settings_save(&g_settings);
+}
+
+static void cb_mute(lv_event_t *e)
+{
+    lv_obj_t *sw = lv_event_get_target(e);
+    g_settings.alert_muted = lv_obj_has_state(sw, LV_STATE_CHECKED) ? 1 : 0;
+    settings_save(&g_settings);
+}
+
+static void cb_threshold(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target(e);
+    /* slider 范围 10~100，对应 0.1g~1.0g */
+    float thr = (float)lv_slider_get_value(sl) / 100.0f;
+    g_settings.anomaly_threshold = thr;
+    algo_anomaly_set_threshold(thr);
+    settings_save(&g_settings);
+}
+
+static void refresh_sysinfo(void)
+{
+    if (!g_label_sysinfo) return;
+    char cpu[64] = "未知";
+    FILE *f = fopen("/proc/cpuinfo", "r");
+    if (f) {
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            if (strncmp(line, "Hardware", 8) == 0) {
+                char *p = strchr(line, ':');
+                if (p) { p += 2; line[strcspn(line, "\n")] = 0; snprintf(cpu, sizeof(cpu), "%s", p); }
+                break;
+            }
+        }
+        fclose(f);
+    }
+    unsigned long mem_total = 0, mem_free = 0;
+    f = fopen("/proc/meminfo", "r");
+    if (f) {
+        char key[32]; unsigned long val;
+        while (fscanf(f, "%31s %lu %*s\n", key, &val) == 2) {
+            if (strcmp(key, "MemTotal:") == 0) mem_total = val;
+            else if (strcmp(key, "MemAvailable:") == 0) { mem_free = val; break; }
+        }
+        fclose(f);
+    }
+    double uptime = 0.0;
+    f = fopen("/proc/uptime", "r");
+    if (f) { fscanf(f, "%lf", &uptime); fclose(f); }
+    unsigned long up_h = (unsigned long)uptime / 3600;
+    unsigned long up_m = ((unsigned long)uptime % 3600) / 60;
+
+    char buf[200];
+    snprintf(buf, sizeof(buf),
+        "CPU: %s\n内存: %lu MB 总 / %lu MB 可用\n运行时间: %luh %02lum",
+        cpu, mem_total / 1024, mem_free / 1024, up_h, up_m);
+    lv_label_set_text(g_label_sysinfo, buf);
+}
+
+static void cb_db_cleanup(lv_event_t *e)
+{
+    (void)e;
+    db_cleanup_old(30);
+    int64_t n = db_count();
+    if (g_label_db_count) {
+        if (n >= 0)
+            lv_label_set_text_fmt(g_label_db_count, "已清理 30 天前记录  当前: %lld 条", (long long)n);
+        else
+            lv_label_set_text(g_label_db_count, "已清理 30 天前记录");
+    }
+}
+
 /* 设置 Tab */
 static void build_tab_settings(lv_obj_t *tab)
 {
-    /* MQTT 状态卡 */
-    lv_obj_t *card_mqtt = create_card(tab, "MQTT", 8, 8, 496, 160);
+    /* MQTT 状态（左）+ DB 状态（右），y=8 h=130 */
+    lv_obj_t *card_mqtt = create_card(tab, "MQTT", 8, 8, 496, 130);
     create_sub_label(card_mqtt, "主题前缀: " MQTT_TOPIC_PREFIX, 28);
-    create_sub_label(card_mqtt, "Broker: mqtt_init() 传入地址", 52);
+    create_sub_label(card_mqtt, "Broker: mqtt_init() 传入地址", 50);
     g_label_mqtt_val = lv_label_create(card_mqtt);
     lv_label_set_text(g_label_mqtt_val, "---");
     lv_obj_set_style_text_color(g_label_mqtt_val, CLR_VALUE, 0);
     lv_obj_set_style_text_font(g_label_mqtt_val, &lv_font_sf_sc_14, 0);
-    lv_obj_align(g_label_mqtt_val, LV_ALIGN_TOP_LEFT, 0, 76);
+    lv_obj_align(g_label_mqtt_val, LV_ALIGN_TOP_LEFT, 0, 72);
 
-    /* DB 状态卡 */
-    lv_obj_t *card_db = create_card(tab, "SQLite 数据库", 512, 8, 496, 160);
+    lv_obj_t *card_db = create_card(tab, "SQLite 数据库", 512, 8, 496, 130);
 #ifdef SIMULATOR
     create_sub_label(card_db, "路径: ./sensefusion.db", 28);
 #else
     create_sub_label(card_db, "路径: /var/lib/sensefusion/data.db", 28);
 #endif
-    create_sub_label(card_db, "日志: 所有传感器每次更新写入", 52);
     g_label_db_val = lv_label_create(card_db);
     lv_label_set_text(g_label_db_val, "---");
     lv_obj_set_style_text_color(g_label_db_val, CLR_VALUE, 0);
     lv_obj_set_style_text_font(g_label_db_val, &lv_font_sf_sc_14, 0);
-    lv_obj_align(g_label_db_val, LV_ALIGN_TOP_LEFT, 0, 76);
+    lv_obj_align(g_label_db_val, LV_ALIGN_TOP_LEFT, 0, 72);
 
-    /* IR 遥控说明 */
-    lv_obj_t *card_ir = create_card(tab, "红外遥控", 8, 176, 1008, 100);
+    /* 调节卡，y=146 h=330 */
+    lv_obj_t *card_ctrl = create_card(tab, "调节", 8, 146, 1008, 330);
+
+    create_sub_label(card_ctrl, "背光亮度", 28);
+    g_slider_brightness = lv_slider_create(card_ctrl);
+    lv_obj_set_size(g_slider_brightness, 800, 20);
+    lv_obj_align(g_slider_brightness, LV_ALIGN_TOP_LEFT, 0, 54);
+    lv_slider_set_range(g_slider_brightness, 0, 100);
+    lv_slider_set_value(g_slider_brightness, g_settings.brightness, LV_ANIM_OFF);
+    lv_obj_add_event_cb(g_slider_brightness, cb_brightness, LV_EVENT_VALUE_CHANGED, NULL);
+
+    create_sub_label(card_ctrl, "温度单位  °C / °F", 100);
+    g_sw_unit = lv_switch_create(card_ctrl);
+    lv_obj_align(g_sw_unit, LV_ALIGN_TOP_LEFT, 0, 122);
+    if (g_settings.unit_fahrenheit) lv_obj_add_state(g_sw_unit, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(g_sw_unit, cb_unit, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *lbl_mute_title = lv_label_create(card_ctrl);
+    lv_label_set_text(lbl_mute_title, "异常告警静音");
+    lv_obj_set_style_text_color(lbl_mute_title, CLR_SUB, 0);
+    lv_obj_set_style_text_font(lbl_mute_title, &lv_font_sf_sc_14, 0);
+    lv_obj_align(lbl_mute_title, LV_ALIGN_TOP_LEFT, 300, 100);
+    g_sw_mute = lv_switch_create(card_ctrl);
+    lv_obj_align(g_sw_mute, LV_ALIGN_TOP_LEFT, 300, 122);
+    if (g_settings.alert_muted) lv_obj_add_state(g_sw_mute, LV_STATE_CHECKED);
+    lv_obj_add_event_cb(g_sw_mute, cb_mute, LV_EVENT_VALUE_CHANGED, NULL);
+
+    create_sub_label(card_ctrl, "异常检测阈值 (g)", 188);
+    g_slider_threshold = lv_slider_create(card_ctrl);
+    lv_obj_set_size(g_slider_threshold, 800, 20);
+    lv_obj_align(g_slider_threshold, LV_ALIGN_TOP_LEFT, 0, 214);
+    lv_slider_set_range(g_slider_threshold, 10, 100);
+    lv_slider_set_value(g_slider_threshold,
+                        (int32_t)(g_settings.anomaly_threshold * 100.0f), LV_ANIM_OFF);
+    lv_obj_add_event_cb(g_slider_threshold, cb_threshold, LV_EVENT_VALUE_CHANGED, NULL);
+}
+
+static void build_tab_system(lv_obj_t *tab)
+{
+    /* 系统信息，y=8 h=140 */
+    lv_obj_t *card_sys = create_card(tab, "系统信息", 8, 8, 1008, 140);
+    g_label_sysinfo = lv_label_create(card_sys);
+    lv_label_set_text(g_label_sysinfo, "加载中...");
+    lv_obj_set_style_text_color(g_label_sysinfo, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_sysinfo, &lv_font_sf_sc_14, 0);
+    lv_obj_align(g_label_sysinfo, LV_ALIGN_TOP_LEFT, 0, 26);
+    lv_label_set_long_mode(g_label_sysinfo, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(g_label_sysinfo, 984);
+
+    /* DB 清理，y=156 h=130 */
+    lv_obj_t *card_clean = create_card(tab, "数据库清理", 8, 156, 1008, 130);
+    create_sub_label(card_clean, "清理指定天数前的历史记录, 释放磁盘空间", 28);
+    lv_obj_t *btn_clean = lv_button_create(card_clean);
+    lv_obj_set_size(btn_clean, 140, 36);
+    lv_obj_align(btn_clean, LV_ALIGN_TOP_LEFT, 0, 58);
+    lv_obj_set_style_bg_color(btn_clean, CLR_BORDER, 0);
+    lv_obj_t *lbl_btn = lv_label_create(btn_clean);
+    lv_label_set_text(lbl_btn, "清理 30 天前");
+    lv_obj_set_style_text_font(lbl_btn, &lv_font_sf_sc_14, 0);
+    lv_obj_center(lbl_btn);
+    lv_obj_add_event_cb(btn_clean, cb_db_cleanup, LV_EVENT_CLICKED, NULL);
+    g_label_db_count = lv_label_create(card_clean);
+    lv_label_set_text(g_label_db_count, "点击按钮执行清理");
+    lv_obj_set_style_text_color(g_label_db_count, CLR_SUB, 0);
+    lv_obj_set_style_text_font(g_label_db_count, &lv_font_sf_sc_14, 0);
+    lv_obj_align(g_label_db_count, LV_ALIGN_TOP_LEFT, 160, 68);
+
+    /* IR 遥控说明，y=294 h=64 */
+    lv_obj_t *card_ir = create_card(tab, "红外遥控", 8, 294, 1008, 64);
     create_sub_label(card_ir,
-        "KEY_LEFT / KEY_RIGHT  —  切换 Tab（总览 / 趋势 / 设置）", 28);
-    create_sub_label(card_ir,
-        "模拟器：鼠标点击 Tab 标签切换页面", 52);
+        "KEY_LEFT / KEY_RIGHT  --  循环切换 Tab [总览/趋势/设置/系统]", 28);
 }
 
 /* ── 主界面构建入口 ───────────────────────────────────────── */
 static void build_ui(const app_settings_t *settings)
 {
-    (void)settings;  /* 预留：后续设置页控件用到 */
+    g_settings = *settings;
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, CLR_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
@@ -464,12 +634,13 @@ static void build_ui(const app_settings_t *settings)
     lv_obj_t *tab_overview = lv_tabview_add_tab(g_tabview, "  总览  ");
     lv_obj_t *tab_trend    = lv_tabview_add_tab(g_tabview, "  趋势  ");
     lv_obj_t *tab_settings = lv_tabview_add_tab(g_tabview, "  设置  ");
+    lv_obj_t *tab_system   = lv_tabview_add_tab(g_tabview, "  系统  ");
 
     set_tabview_tab_font(g_tabview, &lv_font_sf_sc_16);
 
     /* 各 tab 背景与内边距 */
-    lv_obj_t *tabs[3] = {tab_overview, tab_trend, tab_settings};
-    for (int i = 0; i < 3; i++) {
+    lv_obj_t *tabs[4] = {tab_overview, tab_trend, tab_settings, tab_system};
+    for (int i = 0; i < 4; i++) {
         lv_obj_set_style_bg_color(tabs[i], CLR_BG, 0);
         lv_obj_set_style_bg_opa(tabs[i], LV_OPA_COVER, 0);
         lv_obj_set_style_pad_all(tabs[i], 0, 0);
@@ -480,6 +651,8 @@ static void build_ui(const app_settings_t *settings)
     build_tab_overview(tab_overview);
     build_tab_trend(tab_trend);
     build_tab_settings(tab_settings);
+    build_tab_system(tab_system);
+    refresh_sysinfo();
 
     /* 全屏详情层（挂在 screen，渲染在 tabview 之上） */
     build_detail_panel(scr);
@@ -668,7 +841,12 @@ uint32_t dashboard_tick(void)
 
     /* ── 总览 Tab 更新 ── */
     if (local.dht11_dirty) {
-        lv_label_set_text_fmt(g_label_temp,     "%.1f°C",    local.temp);
+        if (g_settings.unit_fahrenheit) {
+            float f = local.temp * 1.8f + 32.0f;
+            lv_label_set_text_fmt(g_label_temp, "%.1f°F", f);
+        } else {
+            lv_label_set_text_fmt(g_label_temp, "%.1f°C", local.temp);
+        }
         lv_label_set_text_fmt(g_label_humidity, "%.0f %%RH", local.humidity);
         /* 趋势图：×10 整数化 */
         lv_chart_set_next_value(g_chart_temp, g_ser_temp,
@@ -716,7 +894,7 @@ uint32_t dashboard_tick(void)
     }
 
     /* ── 告警横幅 ── */
-    if (local.anomaly_dirty) {
+    if (local.anomaly_dirty && !g_settings.alert_muted) {
         lv_label_set_text_fmt(g_label_alert,
             "  检测到震动/冲击  幅度 %.3fg", local.anomaly_mag);
         lv_obj_clear_flag(g_panel_alert, LV_OBJ_FLAG_HIDDEN);
@@ -726,8 +904,8 @@ uint32_t dashboard_tick(void)
     if (local.ir_dirty) {
         uint32_t cur  = lv_tabview_get_tab_active(g_tabview);
         uint32_t next = (local.ir_key == IR_KEY_RIGHT)
-                        ? (cur + 1) % 3
-                        : (cur + 3 - 1) % 3;
+                        ? (cur + 1) % 4
+                        : (cur + 4 - 1) % 4;
         lv_tabview_set_active(g_tabview, next, LV_ANIM_ON);
     }
 
@@ -742,11 +920,12 @@ uint32_t dashboard_tick(void)
             lv_obj_add_flag(g_panel_alert, LV_OBJ_FLAG_HIDDEN);
     }
 
-    /* ── 设置 Tab：定期刷新 MQTT / DB 状态 ── */
+    /* ── 设置 Tab：定期刷新 MQTT / DB 状态 / 系统信息 ── */
     if (++status_ticks >= STATUS_REFRESH_TICKS) {
         status_ticks = 0;
         lv_label_set_text(g_label_mqtt_val, mqtt_status_str());
         lv_label_set_text(g_label_db_val,   db_status_str());
+        refresh_sysinfo();
     }
 
     return lv_timer_handler();
