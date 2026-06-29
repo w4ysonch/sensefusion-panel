@@ -8,18 +8,9 @@
 
 #ifdef SIMULATOR
 
+#include "../sim/sim_utils.h"
+
 static unsigned int g_seed = 0xDEAD2222u;
-
-static float sim_walk(float val, float min, float max, float step)
-{
-    float r = (float)rand_r(&g_seed) / (float)RAND_MAX;
-    float delta = (r * 2.0f - 1.0f) * step;
-    val += delta;
-    if (val < min) val = min;
-    if (val > max) val = max;
-    return val;
-}
-
 static float s_ax = 0.0f;
 static float s_ay = 0.0f;
 static float s_az = 1.0f;
@@ -34,9 +25,9 @@ static int read_adxl345(float *x, float *y, float *z)
         *y = ((float)rand_r(&g_seed) / (float)RAND_MAX * 2.0f - 1.0f) * 2.5f;
         *z = 1.0f;
     } else {
-        s_ax = sim_walk(s_ax, -0.3f,  0.3f, 0.05f);
-        s_ay = sim_walk(s_ay, -0.3f,  0.3f, 0.05f);
-        s_az = sim_walk(s_az,  0.85f, 1.15f, 0.02f);
+        s_ax = sim_walk(s_ax, -0.3f,  0.3f, 0.05f, &g_seed);
+        s_ay = sim_walk(s_ay, -0.3f,  0.3f, 0.05f, &g_seed);
+        s_az = sim_walk(s_az,  0.85f, 1.15f, 0.02f, &g_seed);
         *x = s_ax;
         *y = s_ay;
         *z = s_az;
