@@ -7,19 +7,15 @@
 
 #ifdef SIMULATOR
 
-static unsigned int g_seed = 0xDEAD4444u;
-static int s_counter = 0;
-static uint8_t s_state = 0;
+static int     s_counter = 0;
+static uint8_t s_state   = 0;
 
 static int read_sr501(uint8_t *detected)
 {
-    /* 每 50 次（约 5 秒）随机决定是否切换状态 */
-    s_counter++;
-    if (s_counter >= 50) {
+    /* 每 60 次（约 6 秒）确定性翻转，模拟器下行为可预期 */
+    if (++s_counter >= 60) {
         s_counter = 0;
-        /* 50% 概率翻转 */
-        if ((rand_r(&g_seed) & 1u) == 0u)
-            s_state ^= 1u;
+        s_state ^= 1u;
     }
     *detected = s_state;
     return 0;
@@ -41,12 +37,11 @@ void *sensor_sr501_thread(void *arg)
 {
     (void)arg;
     uint32_t uuid     = embedmq_uuid(EVT_SENSOR_SR501);
-    uint8_t  last_val = 0;
+    uint8_t  last_val = 0xFF;  /* 强制首次上报，让 ui_app 连上来就有初始值 */
 
     while (1) {
         evt_sr501_t ev;
         if (read_sr501(&ev.detected) == 0 && ev.detected != last_val) {
-            /* 只在状态变化时发事件，避免重复刷新 UI */
             last_val = ev.detected;
             embedmq_post_id(g_mq, uuid, &ev, sizeof(ev));
         }
