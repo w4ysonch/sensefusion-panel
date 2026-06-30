@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include "input_ir.h"
-#include "../app/app_init.h"
-#include "../app/app_events.h"
+#include "../ui/ui_dashboard.h"
 
 #ifdef SIMULATOR
 
@@ -25,7 +24,6 @@ void *input_ir_thread(void *arg)
 void *input_ir_thread(void *arg)
 {
     (void)arg;
-    uint32_t uuid = embedmq_uuid(EVT_INPUT_IR);
 
     int fd = open(IR_DEVICE, O_RDONLY);
     if (fd < 0) {
@@ -40,11 +38,8 @@ void *input_ir_thread(void *arg)
             break;
 
         /* 只在按键按下（value==1）时上报，不处理长按（value==2）和抬起（value==0） */
-        if (ie.type == EV_KEY && ie.value == 1) {
-            evt_ir_t ev;
-            ev.key_code = ie.code;
-            embedmq_post_id(g_mq, uuid, &ev, sizeof(ev));
-        }
+        if (ie.type == EV_KEY && ie.value == 1)
+            dashboard_handle_ir_key((uint16_t)ie.code);
     }
 
     close(fd);

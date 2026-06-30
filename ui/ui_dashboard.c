@@ -8,6 +8,7 @@
 #include "../storage/settings.h"
 #include "../network/mqtt_client.h"
 #include "../algo/anomaly.h"
+#include "../ipc/ipc_shm.h"
 
 #ifdef SIMULATOR
 #include "../sim/lv_drv_sdl.h"
@@ -455,6 +456,7 @@ static void cb_threshold(lv_event_t *e)
     g_settings.anomaly_threshold = thr;
     algo_anomaly_set_threshold(thr);
     settings_save(&g_settings);
+    ipc_shm_write_settings(&g_settings);
 }
 
 static void refresh_sysinfo(void)

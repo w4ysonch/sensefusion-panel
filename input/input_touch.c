@@ -1,7 +1,6 @@
 #include <stdio.h>
 #include "input_touch.h"
-#include "../app/app_init.h"
-#include "../app/app_events.h"
+#include "../ui/ui_dashboard.h"
 
 #ifdef SIMULATOR
 
@@ -15,7 +14,6 @@ void *input_touch_thread(void *arg)
 
 #else
 
-#include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
@@ -26,7 +24,6 @@ void *input_touch_thread(void *arg)
 void *input_touch_thread(void *arg)
 {
     (void)arg;
-    uint32_t uuid = embedmq_uuid(EVT_INPUT_TOUCH);
 
     int fd = open(TOUCH_DEVICE, O_RDONLY);
     if (fd < 0) {
@@ -35,7 +32,8 @@ void *input_touch_thread(void *arg)
     }
 
     struct input_event ie;
-    evt_touch_t ev = {0};
+    int32_t x = 0, y = 0;
+    uint8_t pressed = 0;
 
     while (1) {
         if (read(fd, &ie, sizeof(ie)) < 0)
@@ -43,12 +41,12 @@ void *input_touch_thread(void *arg)
 
         /* 多点触控 B 协议：累积坐标与按下状态，SYN_REPORT 时统一上报 */
         if (ie.type == EV_KEY && ie.code == BTN_TOUCH) {
-            ev.pressed = (uint8_t)ie.value;
+            pressed = (uint8_t)ie.value;
         } else if (ie.type == EV_ABS) {
-            if (ie.code == ABS_MT_POSITION_X)  ev.x = ie.value;
-            if (ie.code == ABS_MT_POSITION_Y)  ev.y = ie.value;
+            if (ie.code == ABS_MT_POSITION_X) x = ie.value;
+            if (ie.code == ABS_MT_POSITION_Y) y = ie.value;
         } else if (ie.type == EV_SYN && ie.code == SYN_REPORT) {
-            embedmq_post_id(g_mq, uuid, &ev, sizeof(ev));
+            dashboard_update_touch(x, y, pressed);
         }
     }
 
