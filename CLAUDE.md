@@ -5,7 +5,7 @@ Context file for AI coding assistants (Claude Code, Cursor, etc.).
 ## Project Overview
 
 **sensefusion-panel** is a multi-sensor fusion display terminal running on an IMX6ULL Linux board.
-5 sensor acquisition threads → embedmq message bus → LVGL 1024×600 dark-theme Dashboard.
+Two-process architecture: sensor_daemon (5 sensor threads → embedmq → IPC send) + sensefusion-ui (IPC recv → LVGL 1024×600 dark-theme Dashboard).
 
 
 ---
@@ -14,17 +14,23 @@ Context file for AI coding assistants (Claude Code, Cursor, etc.).
 
 ```
 sensefusion-panel/
-├── main.c                  Entry point, starts threads, drives LVGL main loop
+├── sensor_daemon.c         daemon process entry (sensors + algo + db + mqtt + IPC send)
+├── ui_app.c                UI process entry (LVGL + IPC recv + input handling)
 ├── app/
 │   ├── app_events.h        All event macros (EVT_*) and payload structs
-│   └── app_init.c/h        embedmq instance creation, 9 handler registrations, teardown
+│   ├── app_init.c/h        embedmq instance and config (daemon only)
+│   └── daemon_handlers.c/h embedmq callbacks: IPC send + algo + db + mqtt
+├── ipc/
+│   ├── ipc_protocol.h      Cross-process protocol: frame structs, alert msg, resource name constants
+│   ├── ipc_socket.c/h      Unix Domain Socket (sensor data stream, daemon→ui)
+│   ├── ipc_mq.c/h          POSIX message queue (anomaly alerts, daemon→ui)
+│   └── ipc_shm.c/h         Shared memory + semaphore (config sync, ui→daemon)
 ├── sensors/                One thread per sensor; real drivers on board (currently TODO stubs)
-├── input/                  Touchscreen (MT protocol B) and IR remote input event threads
+├── input/                  Touchscreen (MT-B) and IR remote threads (call dashboard directly, no embedmq)
 ├── algo/
 │   ├── comfort_index.c/h   Steadman heat index → 5-level comfort rating
 │   └── anomaly.c/h         ADXL345 sliding-window (8 samples) anomaly detection, runtime-adjustable threshold
 ├── ui/
-│   ├── ui_handlers.c/h     embedmq callbacks (ui_on_dht11, etc.)
 │   └── ui_dashboard.c/h    LVGL widgets, sensor_cache_t, dashboard_tick()
 ├── storage/
 │   ├── db.c/h              SQLite WAL persistence (every sensor update)
@@ -36,7 +42,7 @@ sensefusion-panel/
 │   └── lv_drv_sdl.c/h      PC simulator SDL2 HAL (guarded by #ifdef SIMULATOR)
 ├── fonts/                  Custom LVGL CJK font .c files (gen_font.sh auto-generates from source)
 ├── third_party/
-│   ├── embedmq/            git submodule
+│   ├── embedmq/            git submodule (daemon only)
 │   ├── lvgl/               git submodule (LVGL v9)
 │   ├── sqlite3/            SQLite amalgamation (embedded, no system dep)
 │   └── lv_conf.h           LVGL config — LV_BUILD_CONF_DIR in CMakeLists.txt points here
@@ -102,10 +108,14 @@ Second parameter is `size_t`, not `uint16_t`.
 ## Build
 
 ```bash
-# PC simulator
+# PC simulator — builds two binaries
 mkdir build && cd build && cmake .. -DSIMULATOR=ON && make -j$(nproc)
 
-# Board
+# Run (terminal 1 first, then terminal 2)
+./sensefusion-daemon
+./sensefusion-ui
+
+# Board cross-compile
 cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake && make -j$(nproc)
 ```
 

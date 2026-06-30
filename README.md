@@ -19,37 +19,43 @@
 
 ## 架构
 
+系统由两个独立进程组成，通过三条 Linux IPC 通道通信：
+
 ```
-               ┌──────────────────────────────────────────────────┐
-               │                    main.c                        │
-               │   app_init / db_init / mqtt_init / 启动线程      │
-               └───────────────────────┬──────────────────────────┘
-                                       │
-          ┌────────────────────────────┼───────────────────┐
-          │                            │                   │
-     传感器线程组                   输入线程组          LVGL 主线程
- ┌───────────────┐             ┌──────────────┐   ┌─────────────────────┐
- │ dht11_thread  │             │ touch_thread │   │   dashboard_tick()  │
- │ adxl_thread   │             │   ir_thread  │   │  lv_timer_handler() │
- │ sr501_thread  │             └──────┬───────┘   └──────────▲──────────┘
- │ sr04_thread   │                    │                      │
- │ light_thread  │                    │           读 sensor_cache（mutex）
- └──────┬────────┘                    │                      │
-        │ embedmq_post()              │                      │
-        └────────────────┬────────────┘                      │
-                         ▼                                    │
-                  ┌────────────┐                              │
-                  │  embedmq   │                              │
-                  │ 消费者线程  │                              │
-                  └─────┬──────┘                              │
-                        │ ui_on_*(payload, size, ctx)         │
-                        ├── dashboard_update_*() ─────────────┘  写缓存
-                        ├── algo_comfort / algo_anomaly           触发算法
-                        ├── db_log_*()                            SQLite 持久化
-                        └── mqtt_publish_*()                      MQTT 上报
+┌─────────────────────────────────────────────────────────────┐
+│                    sensefusion-daemon                       │
+│                                                             │
+│  dht11_thread  ┐                                            │
+│  adxl_thread   │  embedmq_post()   ┌──────────────────┐    │
+│  sr501_thread  ├──────────────────▶│ embedmq 消费者   │    │
+│  sr04_thread   │                   │ daemon_handlers  │    │
+│  light_thread  ┘                   └──┬───────────────┘    │
+│                                       │                    │
+│                              algo / db_log / mqtt_publish  │
+└──────────────────────────────────┬────────────────────────┘
+                                   │
+          ┌────────────────────────┼──────────────────────────┐
+          │ UDS socket             │ POSIX mq      │ Shared mem│
+          │ 传感器数据帧            │ 异常告警       │ 配置同步  │
+          │ (daemon → ui)          │ (daemon → ui) │ (ui → daemon)
+          └────────────────────────┼──────────────────────────┘
+                                   │
+┌──────────────────────────────────▼──────────────────────────┐
+│                     sensefusion-ui                          │
+│                                                             │
+│  ipc_recv_thread  ┐                                         │
+│  ipc_alert_thread ├──▶  sensor_cache_t (mutex)             │
+│  input_touch      │          │                              │
+│  input_ir         ┘          ▼                              │
+│                        dashboard_tick()                     │
+│                        lv_timer_handler()   ← LVGL 主线程  │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-传感器线程只 `embedmq_post`，不接触 LVGL；消费者线程只写缓存、写 DB、发 MQTT；所有 `lv_*` API 集中在主线程 `dashboard_tick()`。详见 [docs/DESIGN.md](docs/DESIGN.md)。
+- **sensor_daemon**：采集传感器数据，运行算法，写 SQLite，发 MQTT，通过 IPC 推送给 UI
+- **sensefusion-ui**：接收 IPC 数据更新 LVGL 界面，处理触摸/IR 输入，管理设置
+
+详见 [docs/DESIGN.md](docs/DESIGN.md)。
 
 ## 事件总线
 
@@ -91,7 +97,12 @@ cmake .. -DSIMULATOR=ON -DMQTT=ON         # 启用 MQTT 发布
 cmake .. -DSIMULATOR=ON -DASAN=ON         # 启用 AddressSanitizer
 
 make -j$(nproc)
-./sensefusion-panel
+
+# 终端1：先启动 daemon（创建 socket / mq / shm）
+./sensefusion-daemon
+
+# 终端2：再启动 UI（连接 daemon 后显示窗口）
+./sensefusion-ui
 ```
 
 ### IMX6ULL 交叉编译
@@ -100,24 +111,30 @@ make -j$(nproc)
 mkdir build-arm && cd build-arm
 cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake
 make -j$(nproc)
-# scp sensefusion-panel root@<board-ip>:/opt/
+# scp sensefusion-daemon sensefusion-ui root@<board-ip>:/opt/
 ```
 
 ## 目录结构
 
 ```
 sensefusion-panel/
-├── main.c                  主入口：初始化、启动线程、LVGL 主循环
+├── sensor_daemon.c         daemon 进程入口（传感器 + 算法 + DB + MQTT + IPC 发送）
+├── ui_app.c                UI 进程入口（LVGL + IPC 接收 + 输入处理）
 ├── app/
 │   ├── app_events.h        所有事件宏（EVT_*）及 payload 结构体
-│   └── app_init.c/h        embedmq 实例创建、9 个 handler 注册、teardown
+│   ├── app_init.c/h        embedmq 实例与配置（daemon 专用）
+│   └── daemon_handlers.c/h embedmq 回调：IPC 发送 + algo + db + mqtt
+├── ipc/
+│   ├── ipc_protocol.h      跨进程协议：帧结构、告警消息、资源名常量
+│   ├── ipc_socket.c/h      Unix Domain Socket（传感器数据流，daemon→ui）
+│   ├── ipc_mq.c/h          POSIX 消息队列（异常告警，daemon→ui）
+│   └── ipc_shm.c/h         共享内存 + 信号量（配置同步，ui→daemon）
 ├── sensors/                5 路传感器采集线程（板子驱动 TODO，simulator 随机游走）
-├── input/                  触摸屏（MT-B）与红外遥控输入线程
+├── input/                  触摸屏（MT-B）与红外遥控输入线程（直接调用 dashboard）
 ├── algo/
 │   ├── comfort_index.c/h   Steadman 热指数 -> 5 级舒适度
 │   └── anomaly.c/h         ADXL345 滑动窗口（8 样本）异常检测，阈值可运行时调整
 ├── ui/
-│   ├── ui_handlers.c/h     embedmq 回调：更新缓存 + 触发算法 + db/mqtt
 │   └── ui_dashboard.c/h    LVGL 四 Tab UI、sensor_cache_t、dashboard_tick()
 ├── storage/
 │   ├── db.c/h              SQLite WAL 日志（每次传感器更新写入）
@@ -129,7 +146,7 @@ sensefusion-panel/
 │   └── lv_drv_sdl.c/h      PC 模拟器 SDL2 HAL（#ifdef SIMULATOR）
 ├── fonts/                  LVGL 自定义 CJK 字体（gen_font.sh 扫源码自动生成）
 ├── third_party/
-│   ├── embedmq/            消息总线（git submodule）
+│   ├── embedmq/            消息总线（git submodule，daemon 专用）
 │   ├── lvgl/               LVGL v9（git submodule）
 │   ├── sqlite3/            SQLite 3.47.2 amalgamation（内嵌，无系统依赖）
 │   └── lv_conf.h           LVGL 配置
@@ -155,7 +172,7 @@ sensefusion-panel/
 
 ## 当前状态
 
-**Phase 4 完成，模拟器完整可运行，交叉编译就绪：**
+**Phase 5 完成，双进程 IPC 架构，模拟器完整可运行，交叉编译就绪：**
 
 - [x] 四 Tab UI（总览 / 趋势 / 设置 / 系统），深色主题 1024×600
 - [x] 5 路传感器模拟器随机游走数据，实时驱动所有图表
@@ -170,6 +187,10 @@ sensefusion-panel/
 - [x] EEPROM 持久化配置（AT24Cxx，魔数校验，首次启动写默认值）
 - [x] 设置页交互控件（亮度/温度单位/静音/异常阈值，改动实时写 EEPROM）
 - [x] 系统页（CPU/内存/运行时间，数据库清理按钮）
+- [x] 双进程架构（sensor_daemon + sensefusion-ui），三条 Linux IPC 通道：
+  - Unix Domain Socket：传感器数据流（daemon→ui）
+  - POSIX 消息队列：异常告警（daemon→ui）
+  - 共享内存 + 信号量：配置同步 / anomaly_threshold（ui→daemon）
 - [ ] 板子传感器驱动（sensors/ 各 `#else` 分支，需硬件）
 - [ ] EEPROM / backlight sysfs 路径上板确认
 

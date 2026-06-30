@@ -18,50 +18,62 @@ typedef struct { uint8_t type; float magnitude; }              evt_anomaly_t;
 
 ---
 
-## 线程模型
+## 进程模型与线程模型
 
-系统共有 **9 个线程**：5 个传感器线程、2 个输入线程、1 个 embedmq 消费者线程、1 个主线程（LVGL）。
+系统由两个独立进程构成，通过三条 Linux IPC 通道通信。
+
+### sensor_daemon（7 个线程）
 
 ```
-传感器 / 输入线程          embedmq 消费者线程              主线程
-       |                         |                          |
- embedmq_post(EVT_*)       ui_on_*(payload)           dashboard_tick()
-                                 |                          |
-                          mutex_lock(&g_mutex)        mutex_lock(&g_mutex)
-                          cache.field = value         local = cache
-                          cache.dirty = true          cache.dirty = false
-                          mutex_unlock()              mutex_unlock()
-                                 |                          |
-                          db_log_*()                  lv_label_set_text(...)
-                          mqtt_publish_*()            lv_chart_set_next_value(...)
-                                                      lv_timer_handler() -> wait_ms
-                                                           |
-                                                      usleep(wait_ms - 1)
+sensor_dht11_thread   ┐
+sensor_adxl345_thread │  embedmq_post(EVT_*)
+sensor_sr501_thread   ├─────────────────────▶ embedmq 消费者线程
+sensor_sr04_thread    │                              │
+sensor_light_thread   ┘                      daemon_on_*(payload)
+                                                     │
+                                   ┌─────────────────┼──────────────────┐
+                                   │                 │                  │
+                             ipc_socket_send   db_log_*()        mqtt_publish_*()
+                             ipc_mq_send_alert
+```
+
+主线程：`while(g_running) { sleep(1); ipc_shm_read_settings(); }` 轮询阈值变化。
+
+### sensefusion-ui（5 个线程）
+
+```
+ipc_recv_thread   ┐  (UDS 接收帧)
+ipc_alert_thread  │  (mq 接收告警)    mutex_lock
+input_touch       ├──────────────────▶ sensor_cache_t ──────▶ dashboard_tick()
+input_ir          ┘  (直接调用)        mutex_unlock           lv_timer_handler()
+                                                              (LVGL 主线程)
 ```
 
 **关键约束：**
 - LVGL `LV_USE_OS = LV_OS_NONE`，非线程安全；所有 `lv_*` API **只能**在主线程 `dashboard_tick()` 中调用
-- 消费者线程只写 `sensor_cache_t`（mutex 保护）+ SQLite + MQTT，不碰 LVGL
+- ipc_recv/alert/input 线程只写 `sensor_cache_t`（mutex 保护），不碰 LVGL
 - `dashboard_tick()` 先拷贝缓存、清 dirty flag，再在无锁状态下调用 LVGL
 
 ---
 
 ## embedmq 单处理器约束与链式调用
 
-`embedmq_register` 每个事件 UUID 只接受一个 handler。多个模块响应同一事件时，在 handler 内顺序调用：
+`embedmq_register` 每个事件 UUID 只接受一个 handler。多个模块响应同一事件时，在 handler 内顺序调用。
+
+**embedmq 仅存在于 sensor_daemon 进程内**，ui_app 不使用 embedmq，改由 IPC 接收线程直接写 `sensor_cache_t`。
 
 ```c
-// ui_handlers.c — 每个 handler 串联四个操作
-void ui_on_dht11(const void *payload, size_t size, void *ctx) {
+// app/daemon_handlers.c — 每个 handler 串联四个操作
+void daemon_on_dht11(const void *payload, size_t size, void *ctx) {
     const evt_dht11_t *ev = payload;
-    dashboard_update_dht11(ev->temperature, ev->humidity); // 1. 写 UI 缓存
-    algo_comfort_on_dht11(payload, size, NULL);             // 2. 触发算法
-    db_log_dht11(ev->temperature, ev->humidity);            // 3. SQLite 持久化
-    mqtt_publish_dht11(ev->temperature, ev->humidity);      // 4. MQTT 上报
+    ipc_socket_send(s_sock_fd, &frame);        // 1. 通过 UDS 推送给 ui_app
+    algo_comfort_on_dht11(payload, size, NULL); // 2. 触发算法
+    db_log_dht11(ev->temperature, ev->humidity);// 3. SQLite 持久化
+    mqtt_publish_dht11(ev->temperature, ev->humidity); // 4. MQTT 上报
 }
 ```
 
-算法模块在计算完毕后继续 `embedmq_post(EVT_ALGO_COMFORT)`，由 `ui_on_comfort` 接收并更新舒适度卡片。
+算法模块在计算完毕后继续 `embedmq_post(EVT_ALGO_COMFORT)`，由 `daemon_on_comfort` 接收后通过 UDS 推给 ui_app。
 
 ---
 
@@ -187,6 +199,44 @@ handler 运行在消费者线程，写入 `cache.ir_key` 和 `cache.ir_dirty`（
 
 所有设置控件（slider/switch）的回调由 LVGL 在主线程触发，直接修改 `g_settings` 并调用 `settings_save()`，不需要 mutex。`dashboard_tick()` 读取 `g_settings` 也在主线程，无竞争。
 
+阈值回调额外调用 `ipc_shm_write_settings()` 将新值写入共享内存，daemon 主循环每秒读取后调用 `algo_anomaly_set_threshold()` 使其生效。
+
+---
+
+## 跨进程 IPC 设计
+
+### 三通道概览
+
+| 通道 | 机制 | 方向 | 用途 |
+|---|---|---|---|
+| `/tmp/sensefusion.sock` | Unix Domain Socket | daemon→ui | 传感器数据帧（连续） |
+| `/sensefusion_alert` | POSIX 消息队列 | daemon→ui | 异常告警（离散事件） |
+| `/sensefusion_settings` | 共享内存 + 信号量 | ui→daemon | 配置同步（anomaly_threshold） |
+
+### UDS 帧格式
+
+```c
+typedef struct {
+    uint8_t type;    /* ipc_msg_type_t: DHT11/ADXL345/SR501/SR04/LIGHT/COMFORT */
+    uint8_t _pad[3];
+    union { ipc_dht11_t; ipc_adxl345_t; ... } payload;
+} ipc_frame_t;
+```
+
+每次 `write/read` 传输固定 `sizeof(ipc_frame_t)` 字节，`ipc_socket_recv` 内部循环读直到收满，防止粘包。
+
+### POSIX 消息队列
+
+- 队列属性：最大 8 条消息，优先级 1（高于默认 0）
+- sender 端用 `O_NONBLOCK`：队列满时丢弃告警并打印警告，不阻塞 daemon
+- receiver 端阻塞等待，在独立线程（`ipc_alert_thread`）中运行
+
+### 共享内存
+
+- 大小 = `sizeof(app_settings_t)`，命名信号量（初值 1）保护读写
+- daemon 以 `O_CREAT` 创建并写入初始值；ui_app 以 `O_RDWR` 打开已有 shm
+- 仅 `anomaly_threshold` 字段被 daemon 实际消费，其余字段由 EEPROM 负责持久化
+
 ---
 
 ## 算法模块
@@ -253,7 +303,15 @@ handler 运行在消费者线程，写入 `cache.ir_key` 和 `cache.ir_dirty`（
 - 系统页（/proc 系统信息，数据库清理按钮）
 - 异常阈值运行时可调（algo_anomaly_set_threshold）
 
-### Phase 5 — 板子接入（需硬件）
+### Phase 5 — 双进程 IPC 拆分 [x]
+- sensor_daemon + sensefusion-ui 两个独立进程
+- Unix Domain Socket：传感器数据流（daemon→ui，定长帧）
+- POSIX 消息队列：异常告警（daemon→ui，优先级消息）
+- 共享内存 + 命名信号量：anomaly_threshold 实时同步（ui→daemon）
+- input_touch/ir 解耦 embedmq，直接调用 dashboard 函数
+- embedmq 仅保留在 daemon 进程内
+
+### Phase 6 — 板子接入（需硬件）
 - DHT11 字符设备驱动
 - ADXL345 I2C（地址 0x53/0x1D，数据寄存器 0x32~0x37）
 - SR501 / SR04 GPIO sysfs
