@@ -6,7 +6,6 @@
 #include "lvgl/lvgl.h"
 #include "../storage/db.h"
 #include "../storage/settings.h"
-#include "../network/mqtt_client.h"
 #include "../ipc/ipc_shm.h"
 
 #ifdef SIMULATOR
@@ -514,11 +513,11 @@ static void build_tab_settings(lv_obj_t *tab)
 {
     /* MQTT 状态（左）+ DB 状态（右），y=8 h=130 */
     lv_obj_t *card_mqtt = create_card(tab, "MQTT", 8, 8, 496, 130);
-    create_sub_label(card_mqtt, "主题前缀: " MQTT_TOPIC_PREFIX, 28);
-    create_sub_label(card_mqtt, "Broker: mqtt_init() 传入地址", 50);
+    create_sub_label(card_mqtt, "主题前缀: sensefusion/<sensor>", 28);
+    create_sub_label(card_mqtt, "状态由 sensor_daemon 进程管理", 50);
     g_label_mqtt_val = lv_label_create(card_mqtt);
-    lv_label_set_text(g_label_mqtt_val, "---");
-    lv_obj_set_style_text_color(g_label_mqtt_val, CLR_VALUE, 0);
+    lv_label_set_text(g_label_mqtt_val, "daemon 进程管理");
+    lv_obj_set_style_text_color(g_label_mqtt_val, CLR_SUB, 0);
     lv_obj_set_style_text_font(g_label_mqtt_val, &lv_font_sf_sc_14, 0);
     lv_obj_align(g_label_mqtt_val, LV_ALIGN_TOP_LEFT, 0, 72);
 
@@ -923,8 +922,7 @@ uint32_t dashboard_tick(void)
     /* ── 设置 Tab：定期刷新 MQTT / DB 状态 / 系统信息 ── */
     if (++status_ticks >= STATUS_REFRESH_TICKS) {
         status_ticks = 0;
-        lv_label_set_text(g_label_mqtt_val, mqtt_status_str());
-        lv_label_set_text(g_label_db_val,   db_status_str());
+        lv_label_set_text(g_label_db_val, db_status_str());
         refresh_sysinfo();
     }
 

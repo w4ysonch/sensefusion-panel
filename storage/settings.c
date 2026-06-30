@@ -3,7 +3,7 @@
 #include "eeprom.h"
 
 static const app_settings_t DEFAULT_SETTINGS = {
-    .anomaly_threshold = 0.3f,
+    .anomaly_threshold = SETTINGS_DEFAULT_THRESHOLD,
     .unit_fahrenheit   = 0,
     .alert_muted       = 0,
     .brightness        = 80,

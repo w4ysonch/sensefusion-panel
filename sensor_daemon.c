@@ -3,9 +3,9 @@
 #include <signal.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include "app/app_init.h"
-#include "app/app_events.h"
-#include "app/daemon_handlers.h"
+
+#include "common/app_common.h"
+#include "daemon/daemon_handlers.h"
 #include "sensors/sensor_dht11.h"
 #include "sensors/sensor_adxl345.h"
 #include "sensors/sensor_sr501.h"
@@ -29,7 +29,7 @@
 #define MQTT_PORT 1883
 #define MQTT_ID   "sensefusion-daemon"
 
-/* 定义全局 embedmq 实例（sensor 文件通过 app_init.h extern 引用此变量） */
+/* 定义全局 embedmq 实例（sensor 文件通过 app_common.h extern 引用此变量） */
 embedmq_t *g_mq = NULL;
 
 static volatile int g_running = 1;

@@ -2,7 +2,7 @@
 
 ## 事件 Payload 定义
 
-所有事件的 payload 结构体定义在 `app/app_events.h`，本文档与其保持同步。
+所有事件的 payload 结构体定义在 `common/app_common.h`，本文档与其保持同步。
 
 ```c
 typedef struct { float temperature; float humidity; }          evt_dht11_t;
@@ -43,10 +43,10 @@ sensor_light_thread   ┘                      daemon_on_*(payload)
 
 ```
 ipc_recv_thread   ┐  (UDS 接收帧)
-ipc_alert_thread  │  (mq 接收告警)    mutex_lock
-input_touch       ├──────────────────▶ sensor_cache_t ──────▶ dashboard_tick()
-input_ir          ┘  (直接调用)        mutex_unlock           lv_timer_handler()
-                                                              (LVGL 主线程)
+ipc_alert_thread  │  (mq 接收告警)    embedmq_post_id    mutex_lock
+input_touch       ├─────────────────────────────────────▶ sensor_cache_t ──▶ dashboard_tick()
+input_ir          ┘  (embedmq_post_id)   ui_on_*(cache)   mutex_unlock      lv_timer_handler()
+                                                                             (LVGL 主线程)
 ```
 
 **关键约束：**
@@ -60,10 +60,14 @@ input_ir          ┘  (直接调用)        mutex_unlock           lv_timer_han
 
 `embedmq_register` 每个事件 UUID 只接受一个 handler。多个模块响应同一事件时，在 handler 内顺序调用。
 
-**embedmq 仅存在于 sensor_daemon 进程内**，ui_app 不使用 embedmq，改由 IPC 接收线程直接写 `sensor_cache_t`。
+**两个进程各有独立的 `g_mq` 实例**，进程内存隔离，互不干扰。
+
+**daemon 侧**：sensor 线程 post → `daemon_handlers.c` 消费 → IPC send + algo + db + mqtt
+
+**ui 侧**：ipc_recv/alert/input 线程 post → `ui_handlers.c` 消费 → `dashboard_update_*`
 
 ```c
-// app/daemon_handlers.c — 每个 handler 串联四个操作
+// daemon/daemon_handlers.c — 每个 handler 串联四个操作
 void daemon_on_dht11(const void *payload, size_t size, void *ctx) {
     const evt_dht11_t *ev = payload;
     ipc_socket_send(s_sock_fd, &frame);        // 1. 通过 UDS 推送给 ui_app
@@ -303,13 +307,14 @@ typedef struct {
 - 系统页（/proc 系统信息，数据库清理按钮）
 - 异常阈值运行时可调（algo_anomaly_set_threshold）
 
-### Phase 5 — 双进程 IPC 拆分 [x]
+### Phase 5 — 双进程 IPC 拆分 + 架构重构 [x]
 - sensor_daemon + sensefusion-ui 两个独立进程
 - Unix Domain Socket：传感器数据流（daemon→ui，定长帧）
 - POSIX 消息队列：异常告警（daemon→ui，优先级消息）
 - 共享内存 + 命名信号量：anomaly_threshold 实时同步（ui→daemon）
-- input_touch/ir 解耦 embedmq，直接调用 dashboard 函数
-- embedmq 仅保留在 daemon 进程内
+- ui_app 引入 embedmq，ipc_recv/alert/input 线程均通过 embedmq_post 分发
+- 目录结构：app/ 拆分为 daemon/（daemon 专属）和 common/（两进程共用）
+- ui/ 新增 ui_handlers.c、ui_ipc.c，与 daemon/ 分层对称
 
 ### Phase 6 — 板子接入（需硬件）
 - DHT11 字符设备驱动

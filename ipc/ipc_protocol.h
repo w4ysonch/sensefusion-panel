@@ -2,7 +2,6 @@
 #define IPC_PROTOCOL_H
 
 #include <stdint.h>
-#include "../storage/settings.h"
 
 /* ── 资源名称 ──────────────────────────────────────────────────── */
 

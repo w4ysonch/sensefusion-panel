@@ -2,18 +2,29 @@
 #include <pthread.h>
 #include <signal.h>
 #include <unistd.h>
+#include <fcntl.h>
+
+#include "common/app_common.h"
+#include "ui/ui_handlers.h"
 #include "ui/ui_dashboard.h"
+#include "ui/ui_ipc.h"
 #include "input/input_touch.h"
 #include "input/input_ir.h"
 #include "storage/settings.h"
+#include "storage/db.h"
 #include "ipc/ipc_socket.h"
 #include "ipc/ipc_mq.h"
 #include "ipc/ipc_shm.h"
-#include "ipc/ipc_protocol.h"
+
+#ifdef SIMULATOR
+#  define DB_PATH  "./sensefusion.db"
+#else
+#  define DB_PATH  "/var/lib/sensefusion/data.db"
+#endif
+
+embedmq_t *g_mq = NULL;
 
 static volatile int g_running = 1;
-static int          g_sock_fd = -1;
-static mqd_t        g_alert_mq = (mqd_t)-1;
 
 static void on_signal(int sig)
 {
@@ -21,102 +32,76 @@ static void on_signal(int sig)
     g_running = 0;
 }
 
-/* ── IPC 接收线程：UDS 传感器数据帧 → dashboard_update_* ──────── */
-static void *ipc_recv_thread(void *arg)
-{
-    (void)arg;
-    ipc_frame_t f;
-
-    while (ipc_socket_recv(g_sock_fd, &f) == 0) {
-        switch ((ipc_msg_type_t)f.type) {
-        case IPC_MSG_DHT11:
-            dashboard_update_dht11(f.payload.dht11.temperature,
-                                   f.payload.dht11.humidity);
-            break;
-        case IPC_MSG_ADXL345:
-            dashboard_update_accel(f.payload.adxl345.x,
-                                   f.payload.adxl345.y,
-                                   f.payload.adxl345.z,
-                                   f.payload.adxl345.magnitude);
-            break;
-        case IPC_MSG_SR501:
-            dashboard_update_pir(f.payload.sr501.detected);
-            break;
-        case IPC_MSG_SR04:
-            dashboard_update_distance(f.payload.sr04.distance_cm);
-            break;
-        case IPC_MSG_LIGHT:
-            dashboard_update_light(f.payload.light.lux);
-            break;
-        case IPC_MSG_COMFORT:
-            dashboard_update_comfort(f.payload.comfort.heat_index,
-                                     (comfort_level_t)f.payload.comfort.level);
-            break;
-        default:
-            break;
-        }
-    }
-
-    fprintf(stderr, "[ui_app] daemon 连接断开，停止接收\n");
-    g_running = 0;
-    return NULL;
-}
-
-/* ── 告警线程：POSIX mq 异常告警 → dashboard_show_alert ──────── */
-static void *ipc_alert_thread(void *arg)
-{
-    (void)arg;
-    ipc_alert_t alert;
-
-    while (ipc_mq_recv_alert(g_alert_mq, &alert) == 0)
-        dashboard_show_alert(alert.magnitude);
-
-    return NULL;
-}
-
 int main(void)
 {
     signal(SIGINT,  on_signal);
     signal(SIGTERM, on_signal);
 
-    /* ── 加载配置（EEPROM；模拟器下读取失败用默认值） ──────────── */
+    /* ── embedmq 初始化，注册 ui 侧 handlers ─────────────────── */
+    static embedmq_config_t cfg = {
+        .queue_size   = 4096,
+        .max_msg_size = 64,
+        .max_handlers = 16,
+    };
+    g_mq = embedmq_create(&cfg);
+    if (!g_mq) {
+        fprintf(stderr, "[ui_app] embedmq_create 失败\n");
+        return 1;
+    }
+    embedmq_register(g_mq, EVT_SENSOR_DHT11,   ui_on_dht11,   NULL);
+    embedmq_register(g_mq, EVT_SENSOR_ADXL345, ui_on_adxl345, NULL);
+    embedmq_register(g_mq, EVT_SENSOR_SR501,   ui_on_sr501,   NULL);
+    embedmq_register(g_mq, EVT_SENSOR_SR04,    ui_on_sr04,    NULL);
+    embedmq_register(g_mq, EVT_SENSOR_LIGHT,   ui_on_light,   NULL);
+    embedmq_register(g_mq, EVT_ALGO_COMFORT,   ui_on_comfort, NULL);
+    embedmq_register(g_mq, EVT_ALERT_ANOMALY,  ui_on_anomaly, NULL);
+    embedmq_register(g_mq, EVT_INPUT_TOUCH,    ui_on_touch,   NULL);
+    embedmq_register(g_mq, EVT_INPUT_IR,       ui_on_ir,      NULL);
+
+    /* ── 加载配置 ─────────────────────────────────────────────── */
     app_settings_t settings;
     settings_load(&settings);
 
     /* ── 连接 daemon（重试直到成功）────────────────────────────── */
     printf("[ui_app] 等待 sensor_daemon 启动...\n");
-    while (g_sock_fd < 0) {
-        g_sock_fd = ipc_socket_client_connect();
-        if (g_sock_fd < 0)
+    int sock_fd = -1;
+    while (sock_fd < 0) {
+        sock_fd = ipc_socket_client_connect();
+        if (sock_fd < 0)
             sleep(1);
     }
 
-    /* ── 打开 POSIX mq（daemon 已提前创建）──────────────────────── */
-    g_alert_mq = ipc_mq_receiver_open();
-    if (g_alert_mq == (mqd_t)-1) {
+    /* ── 打开 POSIX mq 和共享内存 ────────────────────────────── */
+    mqd_t alert_mq = ipc_mq_receiver_open();
+    if (alert_mq == (mqd_t)-1) {
         fprintf(stderr, "[ui_app] POSIX mq 打开失败\n");
         return 1;
     }
 
-    /* ── 打开共享内存（daemon 已提前创建）──────────────────────── */
     if (ipc_shm_init(0) != 0) {
         fprintf(stderr, "[ui_app] 共享内存打开失败\n");
         return 1;
     }
 
-    /* ── 启动 IPC 接收线程 ────────────────────────────────────── */
+    /* ── 注入 IPC fd，启动 IPC 接收线程 ─────────────────────── */
+    ui_ipc_set_fds(sock_fd, alert_mq);
+
     pthread_t t_recv, t_alert, t_touch, t_ir;
-    pthread_create(&t_recv,  NULL, ipc_recv_thread,  NULL);
-    pthread_create(&t_alert, NULL, ipc_alert_thread, NULL);
+    pthread_create(&t_recv,  NULL, ui_ipc_recv_thread,  NULL);
+    pthread_create(&t_alert, NULL, ui_ipc_alert_thread, NULL);
+
+    /* ── 打开数据库（只读查询 + 用户触发的清理操作）────────────── */
+    if (db_init(DB_PATH) != 0)
+        fprintf(stderr, "[ui_app] 数据库打开失败，系统页统计将不可用\n");
 
     /* ── 初始化 LVGL 界面 ─────────────────────────────────────── */
     dashboard_init(&settings);
 
-    /* ── 启动输入线程（在 dashboard_init 之后，确保 LVGL 已就绪） */
+    /* ── 启动输入线程（dashboard_init 之后确保 LVGL 已就绪）──── */
     pthread_create(&t_touch, NULL, input_touch_thread, NULL);
     pthread_create(&t_ir,    NULL, input_ir_thread,    NULL);
 
-    /* ── 主循环：dashboard_tick() 返回最短等待时间 ───────────── */
+    /* ── 主循环 ──────────────────────────────────────────────── */
     while (g_running) {
         uint32_t wait_ms = dashboard_tick();
         if (wait_ms > 1)
@@ -133,9 +118,11 @@ int main(void)
     pthread_join(t_touch, NULL);
     pthread_join(t_ir,    NULL);
 
-    ipc_mq_close(g_alert_mq);
+    ipc_mq_close(alert_mq);
     ipc_shm_close();
-    if (g_sock_fd >= 0) close(g_sock_fd);
+    if (sock_fd >= 0) close(sock_fd);
+    db_deinit();
+    embedmq_destroy(g_mq);
 
     return 0;
 }

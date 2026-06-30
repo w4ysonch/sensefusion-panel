@@ -43,12 +43,15 @@
 ┌──────────────────────────────────▼──────────────────────────┐
 │                     sensefusion-ui                          │
 │                                                             │
-│  ipc_recv_thread  ┐                                         │
-│  ipc_alert_thread ├──▶  sensor_cache_t (mutex)             │
-│  input_touch      │          │                              │
-│  input_ir         ┘          ▼                              │
-│                        dashboard_tick()                     │
-│                        lv_timer_handler()   ← LVGL 主线程  │
+│  ipc_recv_thread  ┐                  ┌──────────────────┐  │
+│  ipc_alert_thread │  embedmq_post_id │ embedmq 消费者   │  │
+│  input_touch      ├─────────────────▶│ ui_handlers      │  │
+│  input_ir         ┘                  └────────┬─────────┘  │
+│                                               │            │
+│                                  sensor_cache_t (mutex)    │
+│                                               │            │
+│                                        dashboard_tick()    │
+│                                        lv_timer_handler()  ← LVGL 主线程
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -59,17 +62,17 @@
 
 ## 事件总线
 
-| 事件 | Payload | 发布方 |
-|---|---|---|
-| `EVT_SENSOR_DHT11` | `{ float temperature; float humidity; }` | sensor_dht11 |
-| `EVT_SENSOR_ADXL345` | `{ float x, y, z, magnitude; }` | sensor_adxl345 |
-| `EVT_SENSOR_SR501` | `{ uint8_t detected; }` | sensor_sr501 |
-| `EVT_SENSOR_SR04` | `{ float distance_cm; }` | sensor_sr04 |
-| `EVT_SENSOR_LIGHT` | `{ uint16_t lux; }` | sensor_light |
-| `EVT_ALGO_COMFORT` | `{ float heat_index; uint8_t level; }` | algo/comfort_index |
-| `EVT_ALERT_ANOMALY` | `{ uint8_t type; float magnitude; }` | algo/anomaly |
-| `EVT_INPUT_TOUCH` | `{ int32_t x, y; uint8_t pressed; }` | input_touch |
-| `EVT_INPUT_IR` | `{ uint16_t key_code; }` | input_ir |
+| 事件 | Payload | 发布方 (daemon) | 发布方 (ui) |
+|---|---|---|---|
+| `EVT_SENSOR_DHT11` | `{ float temperature; float humidity; }` | sensor_dht11 | ipc_recv_thread |
+| `EVT_SENSOR_ADXL345` | `{ float x, y, z, magnitude; }` | sensor_adxl345 | ipc_recv_thread |
+| `EVT_SENSOR_SR501` | `{ uint8_t detected; }` | sensor_sr501 | ipc_recv_thread |
+| `EVT_SENSOR_SR04` | `{ float distance_cm; }` | sensor_sr04 | ipc_recv_thread |
+| `EVT_SENSOR_LIGHT` | `{ uint16_t lux; }` | sensor_light | ipc_recv_thread |
+| `EVT_ALGO_COMFORT` | `{ float heat_index; uint8_t level; }` | algo/comfort_index | ipc_recv_thread |
+| `EVT_ALERT_ANOMALY` | `{ uint8_t type; float magnitude; }` | algo/anomaly | ipc_alert_thread |
+| `EVT_INPUT_TOUCH` | `{ int32_t x, y; uint8_t pressed; }` | — | input_touch |
+| `EVT_INPUT_IR` | `{ uint16_t key_code; }` | — | input_ir |
 
 ## 编译
 
@@ -120,22 +123,24 @@ make -j$(nproc)
 sensefusion-panel/
 ├── sensor_daemon.c         daemon 进程入口（传感器 + 算法 + DB + MQTT + IPC 发送）
 ├── ui_app.c                UI 进程入口（LVGL + IPC 接收 + 输入处理）
-├── app/
-│   ├── app_events.h        所有事件宏（EVT_*）及 payload 结构体
-│   ├── app_init.c/h        embedmq 实例与配置（daemon 专用）
-│   └── daemon_handlers.c/h embedmq 回调：IPC 发送 + algo + db + mqtt
+├── common/
+│   └── app_common.h        两进程共用：extern g_mq、所有 EVT_* 宏及 payload 结构体
+├── daemon/
+│   └── daemon_handlers.c/h embedmq 回调：IPC 发送 + algo + db + mqtt（daemon 专用）
 ├── ipc/
 │   ├── ipc_protocol.h      跨进程协议：帧结构、告警消息、资源名常量
 │   ├── ipc_socket.c/h      Unix Domain Socket（传感器数据流，daemon→ui）
 │   ├── ipc_mq.c/h          POSIX 消息队列（异常告警，daemon→ui）
 │   └── ipc_shm.c/h         共享内存 + 信号量（配置同步，ui→daemon）
 ├── sensors/                5 路传感器采集线程（板子驱动 TODO，simulator 随机游走）
-├── input/                  触摸屏（MT-B）与红外遥控输入线程（直接调用 dashboard）
+├── input/                  触摸屏（MT-B）与红外遥控输入线程（post 到 embedmq）
 ├── algo/
 │   ├── comfort_index.c/h   Steadman 热指数 -> 5 级舒适度
 │   └── anomaly.c/h         ADXL345 滑动窗口（8 样本）异常检测，阈值可运行时调整
 ├── ui/
-│   └── ui_dashboard.c/h    LVGL 四 Tab UI、sensor_cache_t、dashboard_tick()
+│   ├── ui_dashboard.c/h    LVGL 四 Tab UI、sensor_cache_t、dashboard_tick()
+│   ├── ui_handlers.c/h     embedmq 回调：仅调用 dashboard_update_*（ui 专用）
+│   └── ui_ipc.c/h          IPC 接收线程：UDS + mq → embedmq_post（ui 专用）
 ├── storage/
 │   ├── db.c/h              SQLite WAL 日志（每次传感器更新写入）
 │   ├── eeprom.c/h          AT24Cxx I2C EEPROM 驱动（页对齐写入，5ms 延迟）
@@ -146,7 +151,7 @@ sensefusion-panel/
 │   └── lv_drv_sdl.c/h      PC 模拟器 SDL2 HAL（#ifdef SIMULATOR）
 ├── fonts/                  LVGL 自定义 CJK 字体（gen_font.sh 扫源码自动生成）
 ├── third_party/
-│   ├── embedmq/            消息总线（git submodule，daemon 专用）
+│   ├── embedmq/            消息总线（git submodule，两个进程各有独立实例）
 │   ├── lvgl/               LVGL v9（git submodule）
 │   ├── sqlite3/            SQLite 3.47.2 amalgamation（内嵌，无系统依赖）
 │   └── lv_conf.h           LVGL 配置

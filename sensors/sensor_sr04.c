@@ -2,8 +2,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include "sensor_sr04.h"
-#include "../app/app_init.h"
-#include "../app/app_events.h"
+
+#include "../common/app_common.h"
 
 #ifdef SIMULATOR
 

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include "input_touch.h"
-#include "../ui/ui_dashboard.h"
+
+#include "../common/app_common.h"
 
 #ifdef SIMULATOR
 
@@ -31,6 +32,7 @@ void *input_touch_thread(void *arg)
         return NULL;
     }
 
+    uint32_t uuid = embedmq_uuid(EVT_INPUT_TOUCH);
     struct input_event ie;
     int32_t x = 0, y = 0;
     uint8_t pressed = 0;
@@ -46,7 +48,8 @@ void *input_touch_thread(void *arg)
             if (ie.code == ABS_MT_POSITION_X) x = ie.value;
             if (ie.code == ABS_MT_POSITION_Y) y = ie.value;
         } else if (ie.type == EV_SYN && ie.code == SYN_REPORT) {
-            dashboard_update_touch(x, y, pressed);
+            evt_touch_t ev = { x, y, pressed };
+            embedmq_post_id(g_mq, uuid, &ev, sizeof(ev));
         }
     }
 

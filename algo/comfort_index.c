@@ -1,7 +1,7 @@
 #include <string.h>
 #include "comfort_index.h"
-#include "../app/app_init.h"
-#include "../app/app_events.h"
+
+#include "../common/app_common.h"
 
 /* Steadman 公式有效范围下限 */
 #define HI_VALID_TEMP_MIN  20.0f

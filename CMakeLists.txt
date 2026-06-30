@@ -46,7 +46,7 @@ set(COMMON_SOURCES
 # ── sensefusion-daemon ────────────────────────────────────────────────────
 set(DAEMON_SOURCES
     sensor_daemon.c
-    app/daemon_handlers.c
+    daemon/daemon_handlers.c
     sensors/sensor_dht11.c
     sensors/sensor_adxl345.c
     sensors/sensor_sr501.c
@@ -79,6 +79,8 @@ target_link_libraries(sensefusion-daemon PRIVATE
 set(UI_SOURCES
     ui_app.c
     ui/ui_dashboard.c
+    ui/ui_handlers.c
+    ui/ui_ipc.c
     input/input_touch.c
     input/input_ir.c
     storage/db.c
@@ -105,6 +107,7 @@ target_include_directories(sensefusion-ui PRIVATE
 )
 
 target_link_libraries(sensefusion-ui PRIVATE
+    embedmq
     lvgl
     m
     pthread

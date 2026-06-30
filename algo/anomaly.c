@@ -1,11 +1,11 @@
 #include <math.h>
 #include <string.h>
 #include "anomaly.h"
-#include "../app/app_init.h"
-#include "../app/app_events.h"
+
+#include "../common/app_common.h"
+#include "../storage/settings.h"
 
 /* 合加速度偏差检测：若当前值偏离滑动均值超过阈值，判定为震动/冲击。 */
-#define MAGNITUDE_THRESHOLD  0.3f  /* 单位 g */
 #define HISTORY_LEN          8     /* 滑动窗口长度 */
 #define ANOMALY_TYPE_VIBRATION 1
 
@@ -13,7 +13,7 @@ static float history[HISTORY_LEN];
 static int   history_idx   = 0;
 static int   history_count = 0;  /* 已填入样本数，< HISTORY_LEN 时为预热期 */
 
-static float s_threshold = MAGNITUDE_THRESHOLD;
+static float s_threshold = SETTINGS_DEFAULT_THRESHOLD;
 
 static float moving_average(void)
 {

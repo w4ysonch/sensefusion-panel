@@ -2,6 +2,7 @@
 #define IPC_SHM_H
 
 #include "ipc_protocol.h"
+#include "../storage/settings.h"
 
 /* 创建或打开共享内存，建立信号量（两侧都调用）
  * oflag: O_CREAT（daemon 侧首次创建）或 0（ui_app 侧打开已有）

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "daemon_handlers.h"
-#include "app_events.h"
+#include "../common/app_common.h"
 #include "../algo/comfort_index.h"
 #include "../algo/anomaly.h"
 #include "../storage/db.h"

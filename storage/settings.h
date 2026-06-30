@@ -14,7 +14,8 @@ typedef struct {
     uint32_t magic;              /* 校验魔数，0xSF2025CF 表示数据有效 */
 } app_settings_t;
 
-#define SETTINGS_MAGIC 0x5F2025CFu
+#define SETTINGS_MAGIC              0x5F2025CFu
+#define SETTINGS_DEFAULT_THRESHOLD  0.3f        /* algo/anomaly.c 默认值与此保持同步 */
 
 /* 从 EEPROM 加载，若无效则写入默认值 */
 void settings_load(app_settings_t *s);
