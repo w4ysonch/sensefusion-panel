@@ -7,7 +7,6 @@
 #include "../storage/db.h"
 #include "../storage/settings.h"
 #include "../network/mqtt_client.h"
-#include "../algo/anomaly.h"
 #include "../ipc/ipc_shm.h"
 
 #ifdef SIMULATOR
@@ -454,9 +453,8 @@ static void cb_threshold(lv_event_t *e)
     /* slider 范围 10~100，对应 0.1g~1.0g */
     float thr = (float)lv_slider_get_value(sl) / 100.0f;
     g_settings.anomaly_threshold = thr;
-    algo_anomaly_set_threshold(thr);
     settings_save(&g_settings);
-    ipc_shm_write_settings(&g_settings);
+    ipc_shm_write_settings(&g_settings);  /* daemon 轮询 shm 后调用 algo_anomaly_set_threshold */
 }
 
 static void refresh_sysinfo(void)

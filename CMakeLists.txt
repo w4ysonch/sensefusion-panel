@@ -25,66 +25,95 @@ option(ASAN "Enable AddressSanitizer and UBSanitizer" OFF)
 # MQTT 支持（需 libmosquitto-dev）：cmake -DMQTT=ON ..
 option(MQTT "Enable MQTT publishing via libmosquitto" OFF)
 
-# ── embedmq ────────────────────────────────────────────────────────────────
+# ── 第三方库 ───────────────────────────────────────────────────────────────
 add_subdirectory(third_party/embedmq)
 
-# ── LVGL ──────────────────────────────────────────────────────────────────
-# LV_BUILD_CONF_DIR 必须在 add_subdirectory 之前设置，
-# LVGL v9 cmake 通过此变量定位 lv_conf.h。
 set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
     CACHE PATH "Directory containing lv_conf.h" FORCE)
 set(CONFIG_LV_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(CONFIG_LV_BUILD_DEMOS   OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/lvgl)
 
-# ── Sources ────────────────────────────────────────────────────────────────
-set(SOURCES
-    main.c
-    app/app_init.c
+# ── 公共 IPC + 配置源文件（两个 target 共用）─────────────────────────────
+set(COMMON_SOURCES
+    ipc/ipc_socket.c
+    ipc/ipc_mq.c
+    ipc/ipc_shm.c
+    storage/settings.c
+    storage/eeprom.c
+)
+
+# ── sensefusion-daemon ────────────────────────────────────────────────────
+set(DAEMON_SOURCES
+    sensor_daemon.c
+    app/daemon_handlers.c
     sensors/sensor_dht11.c
     sensors/sensor_adxl345.c
     sensors/sensor_sr501.c
     sensors/sensor_sr04.c
     sensors/sensor_light.c
-    input/input_touch.c
-    input/input_ir.c
     algo/comfort_index.c
     algo/anomaly.c
-    ui/ui_handlers.c
-    ui/ui_dashboard.c
-    storage/eeprom.c
     storage/db.c
-    storage/settings.c
     network/mqtt_client.c
+    third_party/sqlite3/sqlite3.c
+)
+
+add_executable(sensefusion-daemon ${DAEMON_SOURCES} ${COMMON_SOURCES})
+
+target_include_directories(sensefusion-daemon PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite3
+)
+
+target_link_libraries(sensefusion-daemon PRIVATE
+    embedmq
+    m
+    pthread
+    rt      # POSIX mq + shm
+    dl      # SQLite 动态扩展
+)
+
+# ── sensefusion-ui ────────────────────────────────────────────────────────
+set(UI_SOURCES
+    ui_app.c
+    ui/ui_dashboard.c
+    input/input_touch.c
+    input/input_ir.c
+    storage/db.c
     third_party/sqlite3/sqlite3.c
     fonts/lv_font_sf_sc_14.c
     fonts/lv_font_sf_sc_16.c
     fonts/lv_font_sf_sc_28.c
 )
 
-# 模拟器额外增加 SDL2 HAL
 if(SIMULATOR)
     find_package(SDL2 REQUIRED)
-    list(APPEND SOURCES
+    list(APPEND UI_SOURCES
         sim/lv_drv_sdl.c
         sim/mouse_cursor_icon.c
     )
 endif()
 
-add_executable(sensefusion-panel ${SOURCES})
+add_executable(sensefusion-ui ${UI_SOURCES} ${COMMON_SOURCES})
 
-target_include_directories(sensefusion-panel PRIVATE
+target_include_directories(sensefusion-ui PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/sqlite3
 )
 
+target_link_libraries(sensefusion-ui PRIVATE
+    lvgl
+    m
+    pthread
+    rt      # POSIX mq + shm
+    dl      # SQLite 动态扩展
+    $<$<BOOL:${SIMULATOR}>:${SDL2_LIBRARIES}>
+)
 
-# ── SQLite3（自带 amalgamation，无需系统 libsqlite3）──────────────────────
-# third_party/sqlite3/sqlite3.c + sqlite3.h 直接参与编译；
-# 好处：交叉编译时不依赖 sysroot 中是否安装 sqlite3。
-
-# ── MQTT（可选）────────────────────────────────────────────────────────────
+# ── MQTT（可选，daemon 侧）────────────────────────────────────────────────
 if(MQTT)
     find_library(MOSQUITTO_LIB mosquitto)
     find_path(MOSQUITTO_INC mosquitto.h)
@@ -93,41 +122,33 @@ if(MQTT)
             "找不到 libmosquitto。\n"
             "  Ubuntu/Debian: sudo apt install libmosquitto-dev")
     endif()
-    target_compile_definitions(sensefusion-panel PRIVATE MQTT_ENABLED=1)
-    target_include_directories(sensefusion-panel PRIVATE ${MOSQUITTO_INC})
-    target_link_libraries(sensefusion-panel PRIVATE ${MOSQUITTO_LIB})
+    target_compile_definitions(sensefusion-daemon PRIVATE MQTT_ENABLED=1)
+    target_include_directories(sensefusion-daemon PRIVATE ${MOSQUITTO_INC})
+    target_link_libraries(sensefusion-daemon PRIVATE ${MOSQUITTO_LIB})
     message(STATUS "MQTT 已启用: ${MOSQUITTO_LIB}")
 endif()
 
-# ── 编译警告 ────────────────────────────────────────────────────────────────
-target_compile_options(sensefusion-panel PRIVATE
-    -Wall
-    -Wextra
-    -Wno-unused-parameter       # LVGL 回调 ctx 经常不用
-    $<$<CONFIG:Debug>:-g3>
-    $<$<CONFIG:Release>:-O2 -DNDEBUG>
-)
+# ── 编译警告（两个 target 共用）──────────────────────────────────────────
+foreach(tgt sensefusion-daemon sensefusion-ui)
+    target_compile_options(${tgt} PRIVATE
+        -Wall
+        -Wextra
+        -Wno-unused-parameter
+        $<$<CONFIG:Debug>:-g3>
+        $<$<CONFIG:Release>:-O2 -DNDEBUG>
+    )
+endforeach()
 
 # ── AddressSanitizer ───────────────────────────────────────────────────────
 if(ASAN)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         message(WARNING "ASAN 建议在 Debug 构建下使用")
     endif()
-    target_compile_options(sensefusion-panel PRIVATE -fsanitize=address,undefined)
-    target_link_options(sensefusion-panel    PRIVATE -fsanitize=address,undefined)
+    foreach(tgt sensefusion-daemon sensefusion-ui)
+        target_compile_options(${tgt} PRIVATE -fsanitize=address,undefined)
+        target_link_options(${tgt}    PRIVATE -fsanitize=address,undefined)
+    endforeach()
 endif()
-
-# ── 链接库 ────────────────────────────────────────────────────────────────
-target_link_libraries(sensefusion-panel PRIVATE
-    embedmq
-    lvgl
-    m
-    pthread
-    $<$<BOOL:${SIMULATOR}>:${SDL2_LIBRARIES}>
-)
-
-# SQLite amalgamation 本身链接时依赖 dl（动态加载扩展用）
-target_link_libraries(sensefusion-panel PRIVATE dl)
 
 # ── 交叉编译（IMX6ULL）──────────────────────────────────────────────────────
 # 用法：cmake -DCMAKE_TOOLCHAIN_FILE=cmake/arm-linux-gnueabihf.cmake ..
