@@ -26,6 +26,8 @@ option(ASAN "Enable AddressSanitizer and UBSanitizer" OFF)
 option(MQTT "Enable MQTT publishing via libmosquitto" OFF)
 
 # ── 第三方库 ───────────────────────────────────────────────────────────────
+set(EMBEDMQ_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(EMBEDMQ_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/embedmq)
 
 set(LV_BUILD_CONF_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
