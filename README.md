@@ -26,33 +26,30 @@
 │                    sensefusion-daemon                       │
 │                                                             │
 │  dht11_thread  ┐                                            │
-│  adxl_thread   │  embedmq_post()   ┌──────────────────┐    │
-│  sr501_thread  ├──────────────────▶│ embedmq 消费者   │    │
-│  sr04_thread   │                   │ daemon_handlers  │    │
-│  light_thread  ┘                   └──┬───────────────┘    │
-│                                       │                    │
-│                              algo / db_log / mqtt_publish  │
-└──────────────────────────────────┬────────────────────────┘
-                                   │
-          ┌────────────────────────┼──────────────────────────┐
-          │ UDS socket             │ POSIX mq      │ Shared mem│
-          │ 传感器数据帧            │ 异常告警       │ 配置同步  │
-          │ (daemon → ui)          │ (daemon → ui) │ (ui → daemon)
-          └────────────────────────┼──────────────────────────┘
-                                   │
-┌──────────────────────────────────▼──────────────────────────┐
-│                     sensefusion-ui                          │
-│                                                             │
-│  ipc_recv_thread  ┐                  ┌──────────────────┐  │
-│  ipc_alert_thread │  embedmq_post_id │ embedmq 消费者   │  │
-│  input_touch      ├─────────────────▶│ ui_handlers      │  │
-│  input_ir         ┘                  └────────┬─────────┘  │
-│                                               │            │
-│                                  sensor_cache_t (mutex)    │
-│                                               │            │
-│                                        dashboard_tick()    │
-│                                        lv_timer_handler()  ← LVGL 主线程
+│  adxl_thread   │  embedmq_post()   ┌──────────────────┐     │
+│  sr501_thread  ├──────────────────▶│ embedmq 消费者    │     │
+│  sr04_thread   │                   │ daemon_handlers  │     │
+│  light_thread  ┘                   └────────┬─────────┘     │
+│                                             │               │
+│                                algo / db_log / mqtt_publish │
 └─────────────────────────────────────────────────────────────┘
+          │ UDS socket          │ POSIX mq        │  Shared mem
+          │ 传感器数据帧          │ 异常告警         │ 配置同步
+          │ (daemon → ui)       │ (daemon → ui)   │ (ui → daemon)
+          ↓                     ↓                 ↓
+┌──────────────────────────────────────────────────────────────────┐
+│                     sensefusion-ui                               │
+│                                                                  │
+│  ipc_recv_thread  ┐                  ┌──────────────────┐        │
+│  ipc_alert_thread │  embedmq_post_id │ embedmq 消费者    │        │
+│  input_touch      ├─────────────────▶│ ui_handlers      │        │
+│  input_ir         ┘                  └────────┬─────────┘        │
+│                                               │                  │
+│                                   sensor_cache_t (mutex)         │
+│                                               │                  │
+│                                        dashboard_tick()          │
+│                                   lv_timer_handler() ← LVGL主线程 │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 - **sensor_daemon**：采集传感器数据，运行算法，写 SQLite，发 MQTT，通过 IPC 推送给 UI
