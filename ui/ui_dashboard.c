@@ -72,7 +72,7 @@ static app_settings_t  g_settings = {0};
 
 /* ── LVGL 控件指针 ───────────────────────────────────────── */
 
-/* 总览 Tab */
+/* 总览 Tab — 数值 label */
 static lv_obj_t *g_label_temp;
 static lv_obj_t *g_label_humidity;
 static lv_obj_t *g_label_comfort_val;
@@ -81,6 +81,25 @@ static lv_obj_t *g_label_pir;
 static lv_obj_t *g_label_dist;
 static lv_obj_t *g_label_lux;
 static lv_obj_t *g_label_accel;
+static lv_obj_t *g_label_amag;          /* 加速度幅值独立 label */
+
+/* 总览 Tab — 圆弧仪表（温度/湿度/距离/光照） */
+static lv_obj_t *g_arc_temp;
+static lv_obj_t *g_arc_humi;
+static lv_obj_t *g_arc_dist;
+static lv_obj_t *g_arc_lux;
+
+/* 总览 Tab — sparkline（复用趋势页 series 的数据） */
+static lv_obj_t *g_spark_temp;
+static lv_obj_t *g_spark_dist;
+static lv_obj_t *g_spark_lux;
+static lv_obj_t *g_spark_amag;
+
+/* 数值动画目标值（×10 整数，与 lv_arc / sparkline 单位一致） */
+static int32_t g_anim_temp  = 0;
+static int32_t g_anim_humi  = 0;
+static int32_t g_anim_dist  = 0;
+static int32_t g_anim_lux   = 0;
 
 /* 趋势 Tab */
 static lv_obj_t           *g_chart_temp;
@@ -106,6 +125,12 @@ static lv_obj_t *g_sw_mute;
 
 /* 趋势 Tab — 每个图表卡片（card 对象）*/
 static lv_obj_t *g_trend_cards[5];  /* 对应 temp/humi/dist/lux/amag */
+
+/* 总览 Tab — sparkline 挂载用卡片指针（build_tab_overview 写入，build_ui 读取） */
+static lv_obj_t *g_ov_card_dht;
+static lv_obj_t *g_ov_card_dist;
+static lv_obj_t *g_ov_card_accel;
+static lv_obj_t *g_ov_card_light;
 
 /* 全屏详情层 */
 static lv_obj_t          *g_detail_panel;
@@ -149,16 +174,6 @@ static lv_obj_t *create_card(lv_obj_t *parent, const char *title,
     return card;
 }
 
-static lv_obj_t *create_value_label(lv_obj_t *card, const char *text, int32_t y)
-{
-    lv_obj_t *lbl = lv_label_create(card);
-    lv_label_set_text(lbl, text);
-    lv_obj_set_style_text_color(lbl, CLR_VALUE, 0);
-    lv_obj_set_style_text_font(lbl, &lv_font_sf_sc_28, 0);
-    lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, y);
-    return lbl;
-}
-
 static lv_obj_t *create_sub_label(lv_obj_t *card, const char *text, int32_t y)
 {
     lv_obj_t *lbl = lv_label_create(card);
@@ -167,6 +182,98 @@ static lv_obj_t *create_sub_label(lv_obj_t *card, const char *text, int32_t y)
     lv_obj_set_style_text_font(lbl, &lv_font_sf_sc_14, 0);
     lv_obj_align(lbl, LV_ALIGN_TOP_LEFT, 0, y);
     return lbl;
+}
+
+/* 创建圆弧仪表盘：返回 arc 对象，居中放在 card 右侧 */
+static lv_obj_t *create_arc_gauge(lv_obj_t *card, int32_t min, int32_t max,
+                                   lv_color_t color, int32_t size,
+                                   int32_t x, int32_t y)
+{
+    lv_obj_t *arc = lv_arc_create(card);
+    lv_obj_set_size(arc, size, size);
+    lv_obj_set_pos(arc, x, y);
+    lv_arc_set_rotation(arc, 135);
+    lv_arc_set_bg_angles(arc, 0, 270);
+    lv_arc_set_range(arc, min, max);
+    lv_arc_set_value(arc, min);
+    lv_obj_set_style_arc_color(arc, color, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(arc, 8, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, CLR_BORDER, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, 8, LV_PART_MAIN);
+    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);   /* 去掉旋钮，纯仪表风格 */
+    lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    return arc;
+}
+
+/* 创建 sparkline：共享外部 series 的 y_points，只读展示 */
+static lv_obj_t *create_sparkline(lv_obj_t *card,
+                                   int32_t y_min, int32_t y_max,
+                                   lv_color_t color,
+                                   lv_chart_series_t *src_ser)
+{
+    lv_obj_t *chart = lv_chart_create(card);
+    lv_obj_set_size(chart, lv_obj_get_width(card) - 24, 52);
+    lv_obj_align(chart, LV_ALIGN_BOTTOM_MID, 0, -2);
+    lv_chart_set_type(chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(chart, CHART_POINTS);
+    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, y_min, y_max);
+    lv_obj_set_style_bg_opa(chart, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(chart, 0, 0);
+    lv_obj_set_style_pad_all(chart, 0, 0);
+    lv_obj_set_style_size(chart, 0, 0, LV_PART_INDICATOR);   /* 去掉点 */
+    lv_obj_set_style_line_width(chart,  2, LV_PART_ITEMS);
+    lv_obj_clear_flag(chart, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_chart_series_t *ser = lv_chart_add_series(
+        chart, color, LV_CHART_AXIS_PRIMARY_Y);
+    /* 共享趋势页的数据，零拷贝 */
+    lv_chart_set_series_ext_y_array(chart, ser, src_ser->y_points);
+    return chart;
+}
+
+/* 数值动画回调：温度（×10 → °C 或 °F） */
+static void anim_temp_cb(void *obj, int32_t v)
+{
+    float c = (float)v / 10.0f;
+    if (g_settings.unit_fahrenheit)
+        lv_label_set_text_fmt((lv_obj_t *)obj, "%.1f°F", c * 1.8f + 32.0f);
+    else
+        lv_label_set_text_fmt((lv_obj_t *)obj, "%.1f°C", c);
+    if (g_arc_temp) lv_arc_set_value(g_arc_temp, v);
+}
+
+static void anim_humi_cb(void *obj, int32_t v)
+{
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%.0f %%RH", (float)v / 10.0f);
+    if (g_arc_humi) lv_arc_set_value(g_arc_humi, v);
+}
+
+static void anim_dist_cb(void *obj, int32_t v)
+{
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%.1f cm", (float)v / 10.0f);
+    if (g_arc_dist) lv_arc_set_value(g_arc_dist, v);
+}
+
+static void anim_lux_cb(void *obj, int32_t v)
+{
+    lv_label_set_text_fmt((lv_obj_t *)obj, "%d lux", v);
+    if (g_arc_lux) lv_arc_set_value(g_arc_lux, v);
+}
+
+static void start_value_anim(lv_obj_t *label,
+                              lv_anim_exec_xcb_t cb,
+                              int32_t *cur, int32_t target)
+{
+    if (*cur == target) return;
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, label);
+    lv_anim_set_exec_cb(&a, cb);
+    lv_anim_set_values(&a, *cur, target);
+    lv_anim_set_duration(&a, 400);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+    *cur = target;
 }
 
 /* 创建带标题的趋势折线图，返回外层 card 对象 */
@@ -334,32 +441,165 @@ static void build_detail_panel(lv_obj_t *scr)
 
 /* ── 各 Tab 构建 ─────────────────────────────────────────── */
 
-/* 总览 Tab — 沿用原有卡片布局，y 坐标相对于 tab 内容区 */
+/* 总览 Tab — 重新布局：左文字 + 右圆弧 + 底部 sparkline */
 static void build_tab_overview(lv_obj_t *tab)
 {
-    /* 第一行（y=8，h=250）*/
-    lv_obj_t *card_dht = create_card(tab, "温湿度  DHT11",  8,   8, 240, 250);
-    g_label_temp     = create_value_label(card_dht, "--.-°C",    28);
-    g_label_humidity = create_sub_label  (card_dht, "--.- %RH",  72);
+    /* ── 卡片尺寸常量 ── */
+    /* 第一行 4 张等宽：(1024 - 8*5) / 4 = 244px，高 270 */
+    /* 第二行 2 张：左 500px + 右 500px，高 240 */
+    /* gap=8，行间距=8，顶部 y=8 */
 
-    lv_obj_t *card_comfort = create_card(tab, "体感舒适度", 256,  8, 240, 250);
-    g_label_comfort_val = create_value_label(card_comfort, "---",        28);
-    g_label_comfort_hi  = create_sub_label  (card_comfort, "HI: --.-°C", 72);
+#define OV_H1   270   /* 第一行高度 */
+#define OV_H2   232   /* 第二行高度 */
+#define OV_W4   244   /* 第一行每张宽度 */
+#define OV_W2   500   /* 第二行每张宽度 */
+#define OV_GAP  8
 
-    lv_obj_t *card_pir = create_card(tab, "人体感应  SR501", 504,  8, 240, 250);
-    g_label_pir = create_value_label(card_pir, "---", 28);
+    /* ── 第一行 ── */
 
-    lv_obj_t *card_dist = create_card(tab, "距离  SR04", 752,  8, 256, 250);
-    g_label_dist = create_value_label(card_dist, "-- cm", 28);
+    /* 温湿度 */
+    lv_obj_t *card_dht = create_card(tab, "温湿度  DHT11",
+        OV_GAP, OV_GAP, OV_W4, OV_H1);
 
-    /* 第二行（y=266，h=250）*/
+    g_label_temp = lv_label_create(card_dht);
+    lv_label_set_text(g_label_temp, "--.-°C");
+    lv_obj_set_style_text_color(g_label_temp, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_temp, &lv_font_sf_sc_28, 0);
+    lv_obj_set_pos(g_label_temp, 0, 24);
+
+    g_label_humidity = lv_label_create(card_dht);
+    lv_label_set_text(g_label_humidity, "--.- %RH");
+    lv_obj_set_style_text_color(g_label_humidity, CLR_SUB, 0);
+    lv_obj_set_style_text_font(g_label_humidity, &lv_font_sf_sc_14, 0);
+    lv_obj_set_pos(g_label_humidity, 0, 68);
+
+    g_arc_temp = create_arc_gauge(card_dht, -100, 500,
+        lv_color_hex(0xf85149), 70, OV_W4 - 70 - 12 - 12, 20);
+    g_arc_humi = create_arc_gauge(card_dht, 0, 1000,
+        lv_color_hex(0x58a6ff), 56, OV_W4 - 56 - 12 - 12, 96);
+
+    /* 舒适度 */
+    lv_obj_t *card_comfort = create_card(tab, "体感舒适度",
+        OV_GAP*2 + OV_W4, OV_GAP, OV_W4, OV_H1);
+
+    g_label_comfort_val = lv_label_create(card_comfort);
+    lv_label_set_text(g_label_comfort_val, "---");
+    lv_obj_set_style_text_color(g_label_comfort_val, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_comfort_val, &lv_font_sf_sc_28, 0);
+    lv_obj_set_pos(g_label_comfort_val, 0, 24);
+
+    g_label_comfort_hi = lv_label_create(card_comfort);
+    lv_label_set_text(g_label_comfort_hi, "HI: --.-°C");
+    lv_obj_set_style_text_color(g_label_comfort_hi, CLR_SUB, 0);
+    lv_obj_set_style_text_font(g_label_comfort_hi, &lv_font_sf_sc_14, 0);
+    lv_obj_set_pos(g_label_comfort_hi, 0, 68);
+
+    /* 5 级色块横排 */
+    static const struct { const char *label; uint32_t color; } levels[] = {
+        {"冷", 0x58a6ff}, {"凉", 0x3fb950}, {"适", 0x3fb950},
+        {"热", 0xd29922}, {"酷热", 0xf85149},
+    };
+    for (int i = 0; i < 5; i++) {
+        lv_obj_t *dot = lv_obj_create(card_comfort);
+        lv_obj_set_size(dot, 32, 22);
+        lv_obj_set_pos(dot, i * 38, 100);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(levels[i].color), 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_20, 0);
+        lv_obj_set_style_border_color(dot, lv_color_hex(levels[i].color), 0);
+        lv_obj_set_style_border_width(dot, 1, 0);
+        lv_obj_set_style_radius(dot, 4, 0);
+        lv_obj_set_style_pad_all(dot, 0, 0);
+        lv_obj_clear_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *dl = lv_label_create(dot);
+        lv_label_set_text(dl, levels[i].label);
+        lv_obj_set_style_text_color(dl, lv_color_hex(levels[i].color), 0);
+        lv_obj_set_style_text_font(dl, &lv_font_sf_sc_14, 0);
+        lv_obj_center(dl);
+    }
+
+    /* PIR */
+    lv_obj_t *card_pir = create_card(tab, "人体感应  SR501",
+        OV_GAP*3 + OV_W4*2, OV_GAP, OV_W4, OV_H1);
+
+    g_label_pir = lv_label_create(card_pir);
+    lv_label_set_text(g_label_pir, "---");
+    lv_obj_set_style_text_color(g_label_pir, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_pir, &lv_font_sf_sc_28, 0);
+    lv_obj_set_pos(g_label_pir, 0, 24);
+
+    /* 状态指示圆点 */
+    lv_obj_t *pir_dot = lv_obj_create(card_pir);
+    lv_obj_set_size(pir_dot, 12, 12);
+    lv_obj_set_pos(pir_dot, 0, 72);
+    lv_obj_set_style_radius(pir_dot, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(pir_dot, CLR_SUB, 0);
+    lv_obj_set_style_border_width(pir_dot, 0, 0);
+    lv_obj_set_style_pad_all(pir_dot, 0, 0);
+    lv_obj_clear_flag(pir_dot, LV_OBJ_FLAG_SCROLLABLE);
+    (void)pir_dot;
+
+    create_sub_label(card_pir, "范围 7m / 120°", 90);
+    create_sub_label(card_pir, "红外热释电", 110);
+
+    /* 距离 */
+    lv_obj_t *card_dist = create_card(tab, "距离  SR04",
+        OV_GAP*4 + OV_W4*3, OV_GAP, OV_W4, OV_H1);
+
+    g_label_dist = lv_label_create(card_dist);
+    lv_label_set_text(g_label_dist, "-- cm");
+    lv_obj_set_style_text_color(g_label_dist, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_dist, &lv_font_sf_sc_28, 0);
+    lv_obj_set_pos(g_label_dist, 0, 24);
+
+    create_sub_label(card_dist, "量程 2~400 cm", 68);
+
+    g_arc_dist = create_arc_gauge(card_dist, 0, 3000,
+        lv_color_hex(0x3fb950), 70, OV_W4 - 70 - 12 - 12, 20);
+
+    /* ── 第二行 ── */
+    int32_t row2_y = OV_GAP*2 + OV_H1;
+
+    /* 三轴加速度 */
     lv_obj_t *card_accel = create_card(tab, "三轴加速度  ADXL345",
-                                        8, 266, 740, 250);
-    g_label_accel = create_sub_label(card_accel,
-        "X: --.--g   Y: --.--g   Z: --.--g   |a|: --.--g", 32);
+        OV_GAP, row2_y, OV_W2, OV_H2);
 
-    lv_obj_t *card_light = create_card(tab, "光照", 756, 266, 252, 250);
-    g_label_lux = create_value_label(card_light, "---- lux", 28);
+    g_label_accel = create_sub_label(card_accel,
+        "X: --.--g   Y: --.--g   Z: --.--g", 24);
+
+    g_label_amag = lv_label_create(card_accel);
+    lv_label_set_text(g_label_amag, "幅值: --.-- g");
+    lv_obj_set_style_text_color(g_label_amag, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_amag, &lv_font_sf_sc_28, 0);
+    lv_obj_set_pos(g_label_amag, 0, 52);
+
+    create_sub_label(card_accel, "ADXL345 三轴 +/-16g", 100);
+
+    /* 光照 */
+    lv_obj_t *card_light = create_card(tab, "光照",
+        OV_GAP*2 + OV_W2, row2_y, OV_W2, OV_H2);
+
+    g_label_lux = lv_label_create(card_light);
+    lv_label_set_text(g_label_lux, "---- lux");
+    lv_obj_set_style_text_color(g_label_lux, CLR_VALUE, 0);
+    lv_obj_set_style_text_font(g_label_lux, &lv_font_sf_sc_28, 0);
+    lv_obj_set_pos(g_label_lux, 0, 24);
+
+    create_sub_label(card_light, "室内正常: 300-500 lux", 68);
+
+    g_arc_lux = create_arc_gauge(card_light, 0, 1000,
+        lv_color_hex(0xd29922), 70, OV_W2 - 70 - 12 - 12, 20);
+
+    /* 保存卡片指针供 sparkline 挂载用（build_ui 在 build_tab_trend 之后读取） */
+    g_ov_card_dht   = card_dht;
+    g_ov_card_dist  = card_dist;
+    g_ov_card_accel = card_accel;
+    g_ov_card_light = card_light;
+
+#undef OV_H1
+#undef OV_H2
+#undef OV_W4
+#undef OV_W2
+#undef OV_GAP
 }
 
 /* 趋势 Tab — 5 个 lv_chart（×10 整数化），点击可全屏查看 */
@@ -514,9 +754,9 @@ static void build_tab_settings(lv_obj_t *tab)
     /* MQTT 状态（左）+ DB 状态（右），y=8 h=130 */
     lv_obj_t *card_mqtt = create_card(tab, "MQTT", 8, 8, 496, 130);
     create_sub_label(card_mqtt, "主题前缀: sensefusion/<sensor>", 28);
-    create_sub_label(card_mqtt, "状态由 sensor_daemon 进程管理", 50);
+    create_sub_label(card_mqtt, "状态由 sensor_daemon 负责", 50);
     g_label_mqtt_val = lv_label_create(card_mqtt);
-    lv_label_set_text(g_label_mqtt_val, "daemon 进程管理");
+    lv_label_set_text(g_label_mqtt_val, "daemon 负责");
     lv_obj_set_style_text_color(g_label_mqtt_val, CLR_SUB, 0);
     lv_obj_set_style_text_font(g_label_mqtt_val, &lv_font_sf_sc_14, 0);
     lv_obj_align(g_label_mqtt_val, LV_ALIGN_TOP_LEFT, 0, 72);
@@ -653,6 +893,18 @@ static void build_ui(const app_settings_t *settings)
     build_tab_system(tab_system);
     refresh_sysinfo();
 
+    /* sparkline：趋势 series 在 build_tab_trend 里创建，这里才能挂。
+     * 必须先 update_layout，否则 lv_obj_get_width 返回 0。 */
+    lv_obj_update_layout(scr);
+    g_spark_temp = create_sparkline(g_ov_card_dht,
+        0, 500, lv_color_hex(0xf85149), g_ser_temp);
+    g_spark_dist = create_sparkline(g_ov_card_dist,
+        0, 3000, lv_color_hex(0x3fb950), g_ser_dist);
+    g_spark_lux  = create_sparkline(g_ov_card_light,
+        0, 1000, lv_color_hex(0xd29922), g_ser_lux);
+    g_spark_amag = create_sparkline(g_ov_card_accel,
+        0, 300, lv_color_hex(0xa371f7), g_ser_amag);
+
     /* 全屏详情层（挂在 screen，渲染在 tabview 之上） */
     build_detail_panel(scr);
 
@@ -673,7 +925,46 @@ static void build_ui(const app_settings_t *settings)
     lv_obj_align(g_label_alert, LV_ALIGN_LEFT_MID, 12, 0);
 }
 
-/* ── 板子触摸 indev（LVGL 原生交互：Tab 点击/滑动等） ── */
+/* ── 告警横幅滑入/滑出动画 ──────────────────────────────────── */
+
+static void alert_y_cb(void *obj, int32_t v)
+{
+    lv_obj_set_y((lv_obj_t *)obj, v);
+}
+
+static void alert_hide_ready_cb(lv_anim_t *a)
+{
+    lv_obj_add_flag((lv_obj_t *)a->var, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void alert_slide_in(void)
+{
+    lv_obj_set_y(g_panel_alert, 600);
+    lv_obj_clear_flag(g_panel_alert, LV_OBJ_FLAG_HIDDEN);
+
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, g_panel_alert);
+    lv_anim_set_exec_cb(&a, alert_y_cb);
+    lv_anim_set_values(&a, 600, 540);
+    lv_anim_set_duration(&a, 300);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
+static void alert_slide_out(void)
+{
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, g_panel_alert);
+    lv_anim_set_exec_cb(&a, alert_y_cb);
+    lv_anim_set_values(&a, 540, 600);
+    lv_anim_set_duration(&a, 250);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_in);
+    lv_anim_set_ready_cb(&a, alert_hide_ready_cb);
+    lv_anim_start(&a);
+}
+
 #ifndef SIMULATOR
 
 static lv_indev_t *g_touch_indev;
@@ -840,18 +1131,13 @@ uint32_t dashboard_tick(void)
 
     /* ── 总览 Tab 更新 ── */
     if (local.dht11_dirty) {
-        if (g_settings.unit_fahrenheit) {
-            float f = local.temp * 1.8f + 32.0f;
-            lv_label_set_text_fmt(g_label_temp, "%.1f°F", f);
-        } else {
-            lv_label_set_text_fmt(g_label_temp, "%.1f°C", local.temp);
-        }
-        lv_label_set_text_fmt(g_label_humidity, "%.0f %%RH", local.humidity);
-        /* 趋势图：×10 整数化 */
-        lv_chart_set_next_value(g_chart_temp, g_ser_temp,
-                                (lv_value_precise_t)(local.temp * 10.0f));
-        lv_chart_set_next_value(g_chart_humi, g_ser_humi,
-                                (lv_value_precise_t)(local.humidity * 10.0f));
+        int32_t t10 = (int32_t)(local.temp * 10.0f);
+        int32_t h10 = (int32_t)(local.humidity * 10.0f);
+        start_value_anim(g_label_temp,     anim_temp_cb, &g_anim_temp, t10);
+        start_value_anim(g_label_humidity, anim_humi_cb, &g_anim_humi, h10);
+        lv_chart_set_next_value(g_chart_temp, g_ser_temp, (lv_value_precise_t)t10);
+        lv_chart_set_next_value(g_chart_humi, g_ser_humi, (lv_value_precise_t)h10);
+        if (g_spark_temp) lv_obj_invalidate(g_spark_temp);
     }
 
     if (local.comfort_dirty) {
@@ -873,30 +1159,34 @@ uint32_t dashboard_tick(void)
     }
 
     if (local.dist_dirty) {
-        lv_label_set_text_fmt(g_label_dist, "%.1f cm", local.dist_cm);
-        lv_chart_set_next_value(g_chart_dist, g_ser_dist,
-                                (lv_value_precise_t)(local.dist_cm * 10.0f));
+        int32_t d10 = (int32_t)(local.dist_cm * 10.0f);
+        start_value_anim(g_label_dist, anim_dist_cb, &g_anim_dist, d10);
+        lv_chart_set_next_value(g_chart_dist, g_ser_dist, (lv_value_precise_t)d10);
+        if (g_spark_dist) lv_obj_invalidate(g_spark_dist);
     }
 
     if (local.light_dirty) {
-        lv_label_set_text_fmt(g_label_lux, "%u lux", local.lux);
-        lv_chart_set_next_value(g_chart_lux, g_ser_lux,
-                                (lv_value_precise_t)local.lux);
+        int32_t lux = (int32_t)local.lux;
+        start_value_anim(g_label_lux, anim_lux_cb, &g_anim_lux, lux);
+        lv_chart_set_next_value(g_chart_lux, g_ser_lux, (lv_value_precise_t)lux);
+        if (g_spark_lux) lv_obj_invalidate(g_spark_lux);
     }
 
     if (local.accel_dirty) {
         lv_label_set_text_fmt(g_label_accel,
-            "X: %+.2fg   Y: %+.2fg   Z: %+.2fg   |a|: %.2fg",
-            local.ax, local.ay, local.az, local.amag);
+            "X: %+.2fg   Y: %+.2fg   Z: %+.2fg",
+            local.ax, local.ay, local.az);
+        lv_label_set_text_fmt(g_label_amag, "幅值: %.2f g", local.amag);
         lv_chart_set_next_value(g_chart_amag, g_ser_amag,
                                 (lv_value_precise_t)(local.amag * 100.0f));
+        if (g_spark_amag) lv_obj_invalidate(g_spark_amag);
     }
 
     /* ── 告警横幅 ── */
     if (local.anomaly_dirty && !g_settings.alert_muted) {
         lv_label_set_text_fmt(g_label_alert,
             "  检测到震动/冲击  幅度 %.3fg", local.anomaly_mag);
-        lv_obj_clear_flag(g_panel_alert, LV_OBJ_FLAG_HIDDEN);
+        alert_slide_in();
         alert_ticks = ALERT_AUTO_HIDE_TICKS;
     }
 
@@ -916,7 +1206,7 @@ uint32_t dashboard_tick(void)
     if (alert_ticks > 0) {
         alert_ticks--;
         if (alert_ticks == 0)
-            lv_obj_add_flag(g_panel_alert, LV_OBJ_FLAG_HIDDEN);
+            alert_slide_out();
     }
 
     /* ── 设置 Tab：定期刷新 MQTT / DB 状态 / 系统信息 ── */
