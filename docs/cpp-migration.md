@@ -587,3 +587,193 @@ extern "C" {
 8. `sensor_daemon.c` → `sensor_daemon.cpp` — 改 atomic + std::thread
 9. `ui_app.c` → `ui_app.cpp` — 同 sensor_daemon
 10. CMakeLists.txt — 更新文件名，升 C++17，IPC 头文件加 extern "C" 守卫
+
+---
+
+## 十一、ui/ui_dashboard.c → ui_dashboard.cpp
+
+### 目标
+
+- 文件改 `.cpp`，机械替换让 C++ 占比达到 70%+
+- 引入 `LvglMemberEventThunk` 模板，把现有的静态回调函数改成类成员函数绑定，这是真正有技术深度可以讲的部分
+
+### 11.1 LvglMemberEventThunk 模板（新建 ui/lvgl_event_adapter.hpp）
+
+参考 aipl-ui 的实现，新建一个小头文件：
+
+```cpp
+// ui/lvgl_event_adapter.hpp
+#pragma once
+#include "lvgl.h"
+
+// 把成员函数指针编译期转换为 C 函数指针，零开销，无堆分配
+// 用法：
+//   lv_obj_add_event_cb(obj,
+//       LvglMemberEventThunk<Dashboard, &Dashboard::OnBrightnessChanged>,
+//       LV_EVENT_VALUE_CHANGED, this);
+template <typename Receiver, void (Receiver::*Method)(lv_event_t *)>
+void LvglMemberEventThunk(lv_event_t *e)
+{
+    auto *self = static_cast<Receiver *>(lv_event_get_user_data(e));
+    if (self) (self->*Method)(e);
+}
+
+// lv_anim_t 的 exec_cb 版本（动画回调）
+template <typename Receiver, void (Receiver::*Method)(lv_obj_t *, int32_t)>
+void LvglMemberAnimThunk(void *obj, int32_t v)
+{
+    // 注意：anim exec_cb 没有 user_data，需要把 this 存在 lv_anim_t::user_data
+    // 见 11.3 动画回调改法
+}
+```
+
+### 11.2 Dashboard 类（ui_dashboard.hpp）
+
+把现有的全局静态函数和全局变量包进一个类：
+
+```cpp
+// ui/ui_dashboard.hpp
+#pragma once
+#include "lvgl.h"
+#include "../storage/settings.hpp"
+#include "lvgl_event_adapter.hpp"
+
+class Dashboard {
+public:
+    static Dashboard& instance();
+
+    void init(const AppSettings &settings);
+    uint32_t tick();
+
+    // embedmq handler 调用的更新接口（保持不变）
+    void update_dht11(float temp, float humi);
+    void update_adxl345(float x, float y, float z, float mag);
+    void update_sr501(int detected);
+    void update_sr04(float dist_cm);
+    void update_light(float lux);
+    void update_comfort(float heat_index, uint8_t level);
+    void show_alert(uint8_t type, float magnitude);
+
+private:
+    Dashboard() = default;
+
+    // ── 设置页回调（原来的静态函数改成成员函数）────────────────
+    void OnBrightnessChanged(lv_event_t *e);
+    void OnUnitChanged(lv_event_t *e);
+    void OnMuteChanged(lv_event_t *e);
+    void OnThresholdChanged(lv_event_t *e);
+    void OnDbCleanup(lv_event_t *e);
+    void OnDetailClose(lv_event_t *e);
+    void OnChartCardClick(lv_event_t *e);
+
+    // ── 成员变量（原来的 g_xxx 全局变量）───────────────────────
+    AppSettings settings_{};
+    lv_obj_t *tabview_{nullptr};
+    lv_obj_t *detail_panel_{nullptr};
+    lv_obj_t *detail_chart_{nullptr};
+    lv_obj_t *detail_title_{nullptr};
+    // ... 其余 g_xxx 全部移进来，去掉 g_ 前缀，加 _ 后缀
+};
+```
+
+### 11.3 回调改法（核心改动）
+
+原来的静态函数写法：
+```c
+static void cb_brightness(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target(e);
+    g_settings.brightness = (uint8_t)lv_slider_get_value(sl);
+    settings_save(&g_settings);
+}
+
+// 注册
+lv_obj_add_event_cb(g_slider_brightness, cb_brightness,
+                    LV_EVENT_VALUE_CHANGED, NULL);
+```
+
+改后成员函数写法：
+```cpp
+void Dashboard::OnBrightnessChanged(lv_event_t *e)
+{
+    lv_obj_t *sl = lv_event_get_target(e);
+    settings_.brightness = static_cast<uint8_t>(lv_slider_get_value(sl));
+    settings_save(settings_);
+}
+
+// 注册（this 作为 user_data 传入）
+lv_obj_add_event_cb(slider_brightness_,
+    LvglMemberEventThunk<Dashboard, &Dashboard::OnBrightnessChanged>,
+    LV_EVENT_VALUE_CHANGED, this);
+```
+
+需要这样改的回调共 7 个：
+- `cb_brightness` → `OnBrightnessChanged`
+- `cb_unit` → `OnUnitChanged`
+- `cb_mute` → `OnMuteChanged`
+- `cb_threshold` → `OnThresholdChanged`
+- `cb_db_cleanup` → `OnDbCleanup`
+- `detail_close_cb` → `OnDetailClose`
+- `chart_card_click_cb` → `OnChartCardClick`
+
+**注意**：`chart_card_click_cb` 原来用 `lv_event_get_user_data` 拿 `chart_meta_t *`，
+改成成员函数后 `user_data` 被 `this` 占用了，`chart_meta_t` 改用 `lv_event_get_target`
+配合成员变量里的 `chart_meta_t` 数组查找，或者用 `lv_obj_get_user_data` 单独存。
+
+### 11.4 动画回调
+
+动画回调签名是 `void (*exec_cb)(void *obj, int32_t v)`，不是 `lv_event_t *`，
+无法直接用 `LvglMemberEventThunk`。最简单的改法是保留为静态成员函数：
+
+```cpp
+// 在 Dashboard 类里声明为 static
+static void AnimTempExecCb(void *obj, int32_t v);
+static void AnimHumiExecCb(void *obj, int32_t v);
+static void AnimDistExecCb(void *obj, int32_t v);
+static void AnimLuxExecCb(void *obj, int32_t v);
+static void AlertYExecCb(void *obj, int32_t v);
+static void AlertHideReadyCb(lv_anim_t *a);
+```
+
+`static` 成员函数有 C 兼容的函数指针，可以直接传给 `lv_anim_set_exec_cb`。
+内部访问 Dashboard 成员通过 `Dashboard::instance()` 单例拿到。
+
+### 11.5 机械替换清单
+
+除了上面的回调改法，其余是机械替换：
+
+| 原 C 写法 | 改后 C++ 写法 |
+|---|---|
+| `(lv_color_t){...}` 复合字面量 | `lv_color_t{...}` |
+| `(chart_meta_t){ .src_chart = ... }` | `chart_meta_t{ nullptr, ... }` 位置初始化 |
+| `(uint8_t)lv_slider_get_value(sl)` | `static_cast<uint8_t>(lv_slider_get_value(sl))` |
+| `(lv_coord_t)x` | `static_cast<lv_coord_t>(x)` |
+| `NULL` | `nullptr` |
+| `g_xxx` 全局变量 | `xxx_` 成员变量 |
+| `static embedmq_config_t cfg = { .field = val }` | `embedmq_config_t cfg{val1, val2, val3}` |
+
+### 11.6 ui_handlers.cpp 对应修改
+
+`ui_handlers.c` 里的 `dashboard_update_*` 调用改成 `Dashboard::instance().update_*(...)`:
+
+```cpp
+extern "C" void ui_on_dht11(const void *payload, size_t size, void *ctx)
+{
+    (void)ctx; (void)size;
+    const auto *ev = static_cast<const evt_dht11_t *>(payload);
+    Dashboard::instance().update_dht11(ev->temperature, ev->humidity);
+}
+```
+
+其余 8 个 handler 同理。
+
+### 11.7 改完后 C++ 占比估算
+
+| 模块 | 行数 | 语言 |
+|---|---|---|
+| ui_dashboard.cpp + ui_handlers.cpp + ui_app.cpp | ~1,420 | C++ |
+| algo/ + storage/ + daemon/ + sensors/ + input/ + network/ + sensor_daemon.cpp | ~1,309 | C++ |
+| ipc_socket/mq/shm + ipc_protocol.h | ~385 | C（保持） |
+| common/ + sim/ + fonts/ | ~31,900 | C（fonts 自动生成不算） |
+
+**业务代码（去掉字体）C++ 占比：约 2,729 / 3,114 = 87%**
