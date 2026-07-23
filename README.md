@@ -90,27 +90,25 @@ sudo apt install libmosquitto-dev
 ```bash
 git clone --recurse-submodules https://github.com/w4ysonch/sensefusion-panel.git
 cd sensefusion-panel
-mkdir build && cd build
 
-cmake .. -DSIMULATOR=ON                   # 基础模式
-cmake .. -DSIMULATOR=ON -DMQTT=ON         # 启用 MQTT 发布
-cmake .. -DSIMULATOR=ON -DASAN=ON         # 启用 AddressSanitizer
-
-make -j$(nproc)
+./tools/build.sh              # Debug，最常用
+./tools/build.sh --mqtt       # 启用 MQTT 发布
+./tools/build.sh --release    # Release 构建
+./tools/build.sh --clean      # 清除重编
 
 # 终端1：先启动 daemon（创建 socket / mq / shm）
-./sensefusion-daemon
+./build-sim/sensefusion-daemon
 
 # 终端2：再启动 UI（连接 daemon 后显示窗口）
-./sensefusion-ui
+./build-sim/sensefusion-ui
 ```
 
 ### IMX6ULL 交叉编译
 
 ```bash
-mkdir build-arm && cd build-arm
-cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake
-make -j$(nproc)
+./tools/build.sh --board
+./tools/build.sh --board --release --mqtt
+
 # scp sensefusion-daemon sensefusion-ui root@<board-ip>:/opt/
 ```
 
@@ -146,7 +144,7 @@ sensefusion-panel/
 │   └── mqtt_client.c/h     libmosquitto 异步发布，-DMQTT=ON 启用
 ├── sim/
 │   └── lv_drv_sdl.c/h      PC 模拟器 SDL2 HAL（#ifdef SIMULATOR）
-├── fonts/                  LVGL 自定义 CJK 字体（gen_font.sh 扫源码自动生成）
+├── fonts/                  LVGL 自定义 CJK 字体（tools/gen_font.sh 扫源码自动生成）
 ├── third_party/
 │   ├── embedmq/            消息总线（git submodule，两个进程各有独立实例）
 │   ├── lvgl/               LVGL v9（git submodule）
@@ -154,6 +152,9 @@ sensefusion-panel/
 │   └── lv_conf.h           LVGL 配置
 ├── cmake/
 │   └── arm-linux-gnueabihf.cmake   Cortex-A7 交叉编译 toolchain
+├── tools/
+│   ├── build.sh            编译脚本（模拟器/板子/MQTT/Release/clean）
+│   └── gen_font.sh         CJK 字体生成脚本
 └── docs/
     └── DESIGN.md           架构与设计决策文档
 ```

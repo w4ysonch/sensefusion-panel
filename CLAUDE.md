@@ -4,7 +4,7 @@ Context file for AI coding assistants (Claude Code, Cursor, etc.).
 
 ## Project Overview
 
-**sensefusion-panel** is a multi-sensor fusion display terminal running on an IMX6ULL Linux board.
+**sensefusion-panel** is an embedded Linux multi-modal sensor fusion terminal running on an IMX6ULL Linux board.
 Two-process architecture: sensor_daemon (5 sensor threads → embedmq → IPC send) + sensefusion-ui (IPC recv → embedmq → LVGL 1024×600 dark-theme Dashboard).
 
 
@@ -42,13 +42,16 @@ sensefusion-panel/
 │   └── mqtt_client.c/h     libmosquitto async publish, enabled with -DMQTT=ON (daemon only)
 ├── sim/
 │   └── lv_drv_sdl.c/h      PC simulator SDL2 HAL (guarded by #ifdef SIMULATOR)
-├── fonts/                  Custom LVGL CJK font .c files (gen_font.sh auto-generates from source)
+├── fonts/                  Custom LVGL CJK font .c files (tools/gen_font.sh auto-generates from source)
 ├── third_party/
 │   ├── embedmq/            git submodule (both processes)
 │   ├── lvgl/               git submodule (LVGL v9)
 │   ├── sqlite3/            SQLite amalgamation (embedded, no system dep)
 │   └── lv_conf.h           LVGL config — LV_BUILD_CONF_DIR in CMakeLists.txt points here
-└── cmake/                  Cross-compile toolchain (arm-linux-gnueabihf.cmake)
+├── cmake/                  Cross-compile toolchain (arm-linux-gnueabihf.cmake)
+└── tools/
+    ├── build.sh            Build script (simulator/board/MQTT/Release/clean)
+    └── gen_font.sh         CJK font generation script
 ```
 
 ---
@@ -119,15 +122,27 @@ Second parameter is `size_t`, not `uint16_t`.
 ## Build
 
 ```bash
-# PC simulator — builds two binaries
-mkdir build && cd build && cmake .. -DSIMULATOR=ON && make -j$(nproc)
+# PC 模拟器（Debug，最常用）
+./tools/build.sh
 
-# Run (terminal 1 first, then terminal 2)
-./sensefusion-daemon
-./sensefusion-ui
+# PC 模拟器 + MQTT
+./tools/build.sh --mqtt
 
-# Board cross-compile
-cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/arm-linux-gnueabihf.cmake && make -j$(nproc)
+# Release 构建
+./tools/build.sh --release
+
+# 交叉编译（板子）
+./tools/build.sh --board
+
+# 组合参数
+./tools/build.sh --board --release --mqtt
+
+# 清除重编
+./tools/build.sh --clean
+
+# 运行（终端1先启动 daemon，终端2启动 ui）
+./build-sim/sensefusion-daemon
+./build-sim/sensefusion-ui
 ```
 
 After cloning: `git submodule update --init --recursive`

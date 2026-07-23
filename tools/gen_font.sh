@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# fonts/gen_font.sh
+# tools/gen_font.sh
 #
 # 扫描项目源码中的汉字，用 lv_font_conv 生成 LVGL 字体 .c 文件。
 # 新增中文文案后重新跑此脚本即可，无需手动维护字符集。
 #
 # 用法：
-#   cd /path/to/sensefusion-panel
-#   bash fonts/gen_font.sh
+#   bash tools/gen_font.sh
 #
 # 前置条件：
 #   npm install -g lv_font_conv
@@ -15,6 +14,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+FONTS_DIR="${PROJECT_ROOT}/fonts"
 
 # ── 字体文件路径（按实际安装位置修改）──────────────────────────
 FONT_PATH="/home/wayson/workspace/aipl-ui/aipl/thirdparty/lvgl/scripts/built_in_font/SourceHanSansSC-Normal.otf"
@@ -61,7 +61,7 @@ ALL_SYMBOLS="${ASCII}${CJK_CHARS}"
 
 # ── 生成各字号 ─────────────────────────────────────────────────
 for SIZE in "${SIZES[@]}"; do
-    OUT="${SCRIPT_DIR}/lv_font_sf_sc_${SIZE}.c"
+    OUT="${FONTS_DIR}/lv_font_sf_sc_${SIZE}.c"
     echo "生成 ${SIZE}px → $(basename "$OUT") ..."
     lv_font_conv \
         --font "$FONT_PATH" \
