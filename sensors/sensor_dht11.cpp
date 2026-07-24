@@ -1,12 +1,13 @@
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
 #include <unistd.h>
-#include <stdlib.h>
 #include "sensor_dht11.h"
-
 #include "../common/app_common.h"
 
-#ifdef SIMULATOR
+#include "../common/g_running.hpp"
 
+#ifdef SIMULATOR
 #include "../sim/sim_utils.h"
 
 static unsigned int g_seed = 0xDEAD1111u;
@@ -24,8 +25,6 @@ static int read_dht11(float *temp, float *humidity)
 
 #else
 
-/* TODO: DHT11 单总线协议需要内核驱动支持，驱动开发完成后再实现
- * 读取方式待定（字符设备 or sysfs），接口确认后填充此函数 */
 static int read_dht11(float *temp, float *humidity)
 {
     *temp     = 26.0f;
@@ -38,15 +37,13 @@ static int read_dht11(float *temp, float *humidity)
 void *sensor_dht11_thread(void *arg)
 {
     (void)arg;
-    /* 提前缓存 UUID，避免循环内每次都做字符串哈希 */
     uint32_t uuid = embedmq_uuid(EVT_SENSOR_DHT11);
 
-    while (1) {
+    while (g_running.load()) {
         evt_dht11_t ev;
         if (read_dht11(&ev.temperature, &ev.humidity) == 0)
             embedmq_post_id(g_mq, uuid, &ev, sizeof(ev));
-
-        sleep(2);  /* DHT11 最快采样间隔 1s，保守取 2s */
+        sleep(2);
     }
-    return NULL;
+    return nullptr;
 }

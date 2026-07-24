@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* EEPROM 起始地址 */
 #define SETTINGS_EEPROM_ADDR  0x0000
 
@@ -21,5 +26,10 @@ typedef struct {
 void settings_load(app_settings_t *s);
 /* 持久化到 EEPROM */
 int  settings_save(const app_settings_t *s);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* SETTINGS_H */

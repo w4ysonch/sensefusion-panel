@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ── 资源名称 ──────────────────────────────────────────────────── */
 
 /* Unix Domain Socket 路径（传感器数据流，daemon→ui） */
@@ -63,5 +68,10 @@ typedef struct {
 /* ── 共享内存布局 ───────────────────────────────────────────────── */
 /* 共享内存直接映射为 app_settings_t（定义在 storage/settings.h）。
  * 信号量 IPC_SEM_NAME 保护并发读写。                              */
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* IPC_PROTOCOL_H */

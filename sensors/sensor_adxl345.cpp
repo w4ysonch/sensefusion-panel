@@ -1,13 +1,13 @@
-#include <stdio.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
 #include <unistd.h>
-#include <math.h>
-#include <stdlib.h>
 #include "sensor_adxl345.h"
-
 #include "../common/app_common.h"
 
-#ifdef SIMULATOR
+#include "../common/g_running.hpp"
 
+#ifdef SIMULATOR
 #include "../sim/sim_utils.h"
 
 static unsigned int g_seed = 0xDEAD2222u;
@@ -17,16 +17,15 @@ static float s_az = 1.0f;
 
 static int read_adxl345(float *x, float *y, float *z)
 {
-    /* 0.5% 概率触发冲击峰值（约每 20s 一次），用于测试告警横幅 */
-    float spike = (float)rand_r(&g_seed) / (float)RAND_MAX;
+    float spike = static_cast<float>(rand_r(&g_seed)) / static_cast<float>(RAND_MAX);
     if (spike < 0.005f) {
-        float dir = (float)rand_r(&g_seed) / (float)RAND_MAX * 2.0f - 1.0f;
+        float dir = static_cast<float>(rand_r(&g_seed)) / static_cast<float>(RAND_MAX) * 2.0f - 1.0f;
         *x = dir * 2.5f;
-        *y = ((float)rand_r(&g_seed) / (float)RAND_MAX * 2.0f - 1.0f) * 2.5f;
+        *y = (static_cast<float>(rand_r(&g_seed)) / static_cast<float>(RAND_MAX) * 2.0f - 1.0f) * 2.5f;
         *z = 1.0f;
     } else {
-        s_ax = sim_walk(s_ax, -0.3f,  0.3f, 0.05f, &g_seed);
-        s_ay = sim_walk(s_ay, -0.3f,  0.3f, 0.05f, &g_seed);
+        s_ax = sim_walk(s_ax, -0.3f,  0.3f,  0.05f, &g_seed);
+        s_ay = sim_walk(s_ay, -0.3f,  0.3f,  0.05f, &g_seed);
         s_az = sim_walk(s_az,  0.85f, 1.15f, 0.02f, &g_seed);
         *x = s_ax;
         *y = s_ay;
@@ -37,8 +36,6 @@ static int read_adxl345(float *x, float *y, float *z)
 
 #else
 
-/* TODO: ADXL345 通过 I2C 读取，I2C 总线号和设备地址需上板确认
- * 参考：I2C 地址 0x53（SDO=GND）或 0x1D（SDO=VCC），寄存器 0x32~0x37 */
 static int read_adxl345(float *x, float *y, float *z)
 {
     *x = 0.01f;
@@ -54,13 +51,13 @@ void *sensor_adxl345_thread(void *arg)
     (void)arg;
     uint32_t uuid = embedmq_uuid(EVT_SENSOR_ADXL345);
 
-    while (1) {
+    while (g_running.load()) {
         evt_adxl345_t ev;
         if (read_adxl345(&ev.x, &ev.y, &ev.z) == 0) {
             ev.magnitude = sqrtf(ev.x*ev.x + ev.y*ev.y + ev.z*ev.z);
             embedmq_post_id(g_mq, uuid, &ev, sizeof(ev));
         }
-        usleep(100000);  /* 100ms，采样率 10Hz */
+        usleep(100000);
     }
-    return NULL;
+    return nullptr;
 }

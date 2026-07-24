@@ -4,6 +4,11 @@
 #include <mqueue.h>
 #include "ipc_protocol.h"
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* ── daemon 侧 ────────────────────────────────────────────────── */
 
 /* 创建并打开消息队列（O_WRONLY|O_CREAT），返回 mqd_t；失败返回 (mqd_t)-1 */
@@ -25,5 +30,10 @@ void  ipc_mq_close(mqd_t mq);
 
 /* daemon 退出时销毁队列（unlink） */
 void  ipc_mq_unlink(void);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* IPC_MQ_H */

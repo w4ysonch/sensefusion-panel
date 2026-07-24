@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* 主题前缀：sensefusion/<sensor> */
 #define MQTT_TOPIC_PREFIX "sensefusion"
 
@@ -38,5 +43,10 @@ static inline void mqtt_publish_anomaly(uint8_t t, float m) { (void)t; (void)m; 
 static inline const char *mqtt_status_str(void) { return "未编译"; }
 
 #endif /* MQTT_ENABLED */
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* NETWORK_MQTT_CLIENT_H */

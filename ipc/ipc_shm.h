@@ -4,6 +4,11 @@
 #include "ipc_protocol.h"
 #include "../storage/settings.h"
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* 创建或打开共享内存，建立信号量（两侧都调用）
  * oflag: O_CREAT（daemon 侧首次创建）或 0（ui_app 侧打开已有）
  * 返回 0=成功，-1=失败 */
@@ -20,5 +25,10 @@ void ipc_shm_write_settings(const app_settings_t *s);
 
 /* daemon 侧：从共享内存读取 settings（sem 保护） */
 void ipc_shm_read_settings(app_settings_t *s);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* IPC_SHM_H */

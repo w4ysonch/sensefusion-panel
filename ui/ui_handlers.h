@@ -3,6 +3,11 @@
 
 #include <stddef.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* embedmq 回调，注册到 ui_app 的 g_mq。
  * 只负责更新 sensor_cache_t（通过 dashboard_update_*），
  * 不做 algo / db / mqtt——那些在 sensor_daemon 侧已完成。 */
@@ -15,5 +20,10 @@ void ui_on_comfort (const void *payload, size_t size, void *ctx);
 void ui_on_anomaly (const void *payload, size_t size, void *ctx);
 void ui_on_touch   (const void *payload, size_t size, void *ctx);
 void ui_on_ir      (const void *payload, size_t size, void *ctx);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UI_HANDLERS_H */

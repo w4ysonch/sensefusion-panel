@@ -3,6 +3,11 @@
 
 #include <stdint.h>
 
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* 初始化/销毁 */
 int  db_init   (const char *path);
 void db_deinit (void);
@@ -24,5 +29,10 @@ const char *db_status_str(void);
 
 /* 返回 readings 表总行数，s_db 为 NULL 时返回 -1 */
 int64_t db_count(void);
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* STORAGE_DB_H */

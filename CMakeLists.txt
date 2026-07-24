@@ -4,7 +4,7 @@ project(sensefusion-panel C CXX)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 默认 Debug 构建；Release：cmake -DCMAKE_BUILD_TYPE=Release ..
@@ -41,23 +41,23 @@ set(COMMON_SOURCES
     ipc/ipc_socket.c
     ipc/ipc_mq.c
     ipc/ipc_shm.c
-    storage/settings.c
     storage/eeprom.c
 )
 
 # ── sensefusion-daemon ────────────────────────────────────────────────────
 set(DAEMON_SOURCES
-    sensor_daemon.c
-    daemon/daemon_handlers.c
-    sensors/sensor_dht11.c
-    sensors/sensor_adxl345.c
-    sensors/sensor_sr501.c
-    sensors/sensor_sr04.c
-    sensors/sensor_light.c
-    algo/comfort_index.c
-    algo/anomaly.c
-    storage/db.c
-    network/mqtt_client.c
+    sensor_daemon.cpp
+    daemon/daemon_handlers.cpp
+    sensors/sensor_dht11.cpp
+    sensors/sensor_adxl345.cpp
+    sensors/sensor_sr501.cpp
+    sensors/sensor_sr04.cpp
+    sensors/sensor_light.cpp
+    algo/comfort_index.cpp
+    algo/anomaly.cpp
+    storage/db.cpp
+    storage/settings.cpp
+    network/mqtt_client.cpp
     third_party/sqlite3/sqlite3.c
 )
 
@@ -79,13 +79,14 @@ target_link_libraries(sensefusion-daemon PRIVATE
 
 # ── sensefusion-ui ────────────────────────────────────────────────────────
 set(UI_SOURCES
-    ui_app.c
-    ui/ui_dashboard.c
-    ui/ui_handlers.c
-    ui/ui_ipc.c
-    input/input_touch.c
-    input/input_ir.c
-    storage/db.c
+    ui_app.cpp
+    ui/ui_dashboard.cpp
+    ui/ui_handlers.cpp
+    ui/ui_ipc.cpp
+    input/input_touch.cpp
+    input/input_ir.cpp
+    storage/db.cpp
+    storage/settings.cpp
     third_party/sqlite3/sqlite3.c
     fonts/lv_font_sf_sc_14.c
     fonts/lv_font_sf_sc_16.c

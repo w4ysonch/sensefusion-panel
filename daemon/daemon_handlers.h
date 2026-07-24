@@ -4,6 +4,10 @@
 #include <stddef.h>
 #include <mqueue.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* sensor_daemon 在 ui_app 连接后调用，设置 IPC 发送通道 */
 void daemon_handlers_set_ipc(int socket_fd, mqd_t alert_mq);
 
@@ -15,5 +19,9 @@ void daemon_on_sr04    (const void *payload, size_t size, void *ctx);
 void daemon_on_light   (const void *payload, size_t size, void *ctx);
 void daemon_on_comfort (const void *payload, size_t size, void *ctx);
 void daemon_on_anomaly (const void *payload, size_t size, void *ctx);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* DAEMON_HANDLERS_H */
