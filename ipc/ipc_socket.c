@@ -2,6 +2,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include "ipc_socket.h"
@@ -49,20 +50,23 @@ int ipc_socket_server_accept(int server_fd)
     return client_fd;
 }
 
-void ipc_socket_send(int client_fd, const ipc_frame_t *frame)
+int ipc_socket_send(int client_fd, const ipc_frame_t *frame)
 {
     const char *buf = (const char *)frame;
     size_t total = sizeof(ipc_frame_t);
     size_t sent  = 0;
 
     while (sent < total) {
-        ssize_t n = write(client_fd, buf + sent, total - sent);
+        /* MSG_NOSIGNAL: 对端关闭时返回 EPIPE 而不是触发 SIGPIPE 信号 */
+        ssize_t n = send(client_fd, buf + sent, total - sent, MSG_NOSIGNAL);
         if (n <= 0) {
-            if (n < 0) perror("[ipc_socket] write");
-            return;
+            if (n < 0 && errno != EINTR)
+                fprintf(stderr, "[ipc_socket] send: %s\n", strerror(errno));
+            return -1;
         }
         sent += (size_t)n;
     }
+    return 0;
 }
 
 int ipc_socket_client_connect(void)

@@ -1,5 +1,6 @@
 #include "daemon_handlers.h"
 #include "../common/app_common.h"
+#include "../common/g_running.hpp"
 #include "../algo/comfort_index.hpp"
 #include "../algo/anomaly.hpp"
 #include "../storage/db.h"
@@ -8,6 +9,7 @@
 #include "../ipc/ipc_mq.h"
 #include <cstdio>
 #include <cstring>
+#include <unistd.h>
 
 static int   s_sock_fd = -1;
 static mqd_t s_mq      = static_cast<mqd_t>(-1);
@@ -16,6 +18,15 @@ void daemon_handlers_set_ipc(int socket_fd, mqd_t alert_mq)
 {
     s_sock_fd = socket_fd;
     s_mq      = alert_mq;
+}
+
+/* UI 断开时调用：关闭 fd 并通知主循环退出 */
+static void on_ui_disconnected()
+{
+    fprintf(stderr, "[daemon] UI 连接断开，准备退出\n");
+    close(s_sock_fd);
+    s_sock_fd = -1;
+    g_running.store(false, std::memory_order_relaxed);
 }
 
 void daemon_on_dht11(const void *payload, size_t size, void *ctx)
@@ -29,7 +40,7 @@ void daemon_on_dht11(const void *payload, size_t size, void *ctx)
         f.type = IPC_MSG_DHT11;
         f.payload.dht11.temperature = ev->temperature;
         f.payload.dht11.humidity    = ev->humidity;
-        ipc_socket_send(s_sock_fd, &f);
+        if (ipc_socket_send(s_sock_fd, &f) < 0) { on_ui_disconnected(); return; }
     }
 
     algo_comfort_on_dht11(payload, size, nullptr);
@@ -50,7 +61,7 @@ void daemon_on_adxl345(const void *payload, size_t size, void *ctx)
         f.payload.adxl345.y         = ev->y;
         f.payload.adxl345.z         = ev->z;
         f.payload.adxl345.magnitude = ev->magnitude;
-        ipc_socket_send(s_sock_fd, &f);
+        if (ipc_socket_send(s_sock_fd, &f) < 0) { on_ui_disconnected(); return; }
     }
 
     algo_anomaly_on_adxl345(payload, size, nullptr);
@@ -68,7 +79,7 @@ void daemon_on_sr501(const void *payload, size_t size, void *ctx)
         ipc_frame_t f{};
         f.type = IPC_MSG_SR501;
         f.payload.sr501.detected = ev->detected;
-        ipc_socket_send(s_sock_fd, &f);
+        if (ipc_socket_send(s_sock_fd, &f) < 0) { on_ui_disconnected(); return; }
     }
 
     db_log_sr501(ev->detected);
@@ -85,7 +96,7 @@ void daemon_on_sr04(const void *payload, size_t size, void *ctx)
         ipc_frame_t f{};
         f.type = IPC_MSG_SR04;
         f.payload.sr04.distance_cm = ev->distance_cm;
-        ipc_socket_send(s_sock_fd, &f);
+        if (ipc_socket_send(s_sock_fd, &f) < 0) { on_ui_disconnected(); return; }
     }
 
     db_log_sr04(ev->distance_cm);
@@ -102,7 +113,7 @@ void daemon_on_light(const void *payload, size_t size, void *ctx)
         ipc_frame_t f{};
         f.type = IPC_MSG_LIGHT;
         f.payload.light.lux = ev->lux;
-        ipc_socket_send(s_sock_fd, &f);
+        if (ipc_socket_send(s_sock_fd, &f) < 0) { on_ui_disconnected(); return; }
     }
 
     db_log_light(ev->lux);
@@ -120,7 +131,7 @@ void daemon_on_comfort(const void *payload, size_t size, void *ctx)
         f.type = IPC_MSG_COMFORT;
         f.payload.comfort.heat_index = ev->heat_index;
         f.payload.comfort.level      = ev->level;
-        ipc_socket_send(s_sock_fd, &f);
+        if (ipc_socket_send(s_sock_fd, &f) < 0) { on_ui_disconnected(); return; }
     }
 
     db_log_comfort(ev->heat_index, ev->level);
