@@ -14,12 +14,13 @@ Two-process architecture: sensor_daemon (5 sensor threads → embedmq → IPC se
 
 ```
 sensefusion-panel/
-├── sensor_daemon.c         daemon process entry (sensors + algo + db + mqtt + IPC send)
-├── ui_app.c                UI process entry (LVGL + IPC recv + embedmq + input handling)
+├── sensor_daemon.cpp       daemon process entry (sensors + algo + db + mqtt + IPC send)
+├── ui_app.cpp              UI process entry (LVGL + IPC recv + embedmq + input handling)
 ├── common/
-│   └── app_common.h        Shared: extern g_mq, all EVT_* macros, payload structs
+│   ├── app_common.h        Shared: extern g_mq, all EVT_* macros, payload structs
+│   └── g_running.hpp       extern std::atomic<bool> g_running (defined in entry files)
 ├── daemon/
-│   └── daemon_handlers.c/h embedmq callbacks: IPC send + algo + db + mqtt (daemon only)
+│   └── daemon_handlers.cpp/h  embedmq callbacks: IPC send + algo + db + mqtt (daemon only)
 ├── ipc/
 │   ├── ipc_protocol.h      Cross-process protocol: frame structs, alert msg, resource name constants
 │   ├── ipc_socket.c/h      Unix Domain Socket (sensor data stream, daemon→ui)
@@ -28,18 +29,18 @@ sensefusion-panel/
 ├── sensors/                One thread per sensor; real drivers on board (currently TODO stubs)
 ├── input/                  Touchscreen (MT-B) and IR remote threads (post to embedmq)
 ├── algo/
-│   ├── comfort_index.c/h   Steadman heat index → 5-level comfort rating
-│   └── anomaly.c/h         ADXL345 sliding-window (8 samples) anomaly detection, runtime-adjustable threshold
+│   ├── comfort_index.cpp/hpp   Steadman heat index → ComfortLevel (C++ enum class)
+│   └── anomaly.cpp/hpp         ADXL345 sliding-window (8 samples) anomaly detection, runtime-adjustable threshold
 ├── ui/
-│   ├── ui_dashboard.c/h    LVGL widgets, sensor_cache_t, dashboard_tick()
-│   ├── ui_handlers.c/h     embedmq callbacks: dashboard_update_* only (ui only)
-│   └── ui_ipc.c/h          IPC receive threads: UDS + mq → embedmq_post (ui only)
+│   ├── ui_dashboard.cpp/hpp    Dashboard singleton, LvglMemberEventThunk, LVGL widgets + tick()
+│   ├── ui_handlers.cpp/h       embedmq callbacks → Dashboard::instance().update_*() (ui only)
+│   └── ui_ipc.cpp/h            IPC receive threads: UDS + mq → embedmq_post (ui only)
 ├── storage/
-│   ├── db.c/h              SQLite WAL persistence (daemon writes; ui reads + cleanup)
+│   ├── db.cpp/h            SQLite WAL persistence (daemon writes; ui reads + cleanup)
 │   ├── eeprom.c/h          AT24Cxx I2C EEPROM driver (page-aligned writes, 5ms delay)
-│   └── settings.c/h        Persistent config (brightness/unit/mute/threshold, magic validation)
+│   └── settings.cpp/h      Persistent config (brightness/unit/mute/threshold, magic validation)
 ├── network/
-│   └── mqtt_client.c/h     libmosquitto async publish, enabled with -DMQTT=ON (daemon only)
+│   └── mqtt_client.cpp/h   libmosquitto async publish, enabled with -DMQTT=ON (daemon only)
 ├── sim/
 │   └── lv_drv_sdl.c/h      PC simulator SDL2 HAL (guarded by #ifdef SIMULATOR)
 ├── fonts/                  Custom LVGL CJK font .c files (tools/gen_font.sh auto-generates from source)
@@ -63,22 +64,24 @@ sensefusion-panel/
 `embedmq_register` accepts only one handler per UUID. Both processes have their own independent
 `g_mq` instance. Producers and consumers are symmetric across both sides:
 
-**daemon side** — sensor threads post, `daemon_handlers.c` consumes:
-```c
-// daemon/daemon_handlers.c — each handler chains four operations
+**daemon side** — sensor threads post, `daemon_handlers.cpp` consumes:
+```cpp
+// daemon/daemon_handlers.cpp — each handler chains four operations
 void daemon_on_dht11(const void *payload, size_t size, void *ctx) {
-    ipc_socket_send(s_sock_fd, &frame);         // 1. push to ui via UDS
-    algo_comfort_on_dht11(payload, size, NULL);  // 2. trigger algo
-    db_log_dht11(ev->temperature, ev->humidity); // 3. SQLite persistence
+    const auto *ev = static_cast<const evt_dht11_t *>(payload);
+    ipc_socket_send(s_sock_fd, &frame);              // 1. push to ui via UDS
+    algo_comfort_on_dht11(payload, size, nullptr);   // 2. trigger algo
+    db_log_dht11(ev->temperature, ev->humidity);     // 3. SQLite persistence
     mqtt_publish_dht11(ev->temperature, ev->humidity); // 4. MQTT publish
 }
 ```
 
-**ui side** — ipc_recv/alert threads and input threads post, `ui_handlers.c` consumes:
-```c
-// ui/ui_handlers.c — only updates sensor_cache_t, no algo/db/mqtt
-void ui_on_dht11(const void *payload, size_t size, void *ctx) {
-    dashboard_update_dht11(ev->temperature, ev->humidity);
+**ui side** — ipc_recv/alert threads and input threads post, `ui_handlers.cpp` consumes:
+```cpp
+// ui/ui_handlers.cpp — calls Dashboard::instance().update_*(), no algo/db/mqtt
+extern "C" void ui_on_dht11(const void *payload, size_t size, void *ctx) {
+    const auto *ev = static_cast<const evt_dht11_t *>(payload);
+    Dashboard::instance().update_dht11(ev->temperature, ev->humidity);
 }
 ```
 
@@ -87,9 +90,9 @@ void ui_on_dht11(const void *payload, size_t size, void *ctx) {
 LVGL is not thread-safe. Solution:
 
 - All producer threads (ipc_recv, ipc_alert, input_touch, input_ir) post to embedmq.
-- The embedmq consumer thread (all `ui_on_*` callbacks) **only writes** to `sensor_cache_t` (mutex-protected).
-- All LVGL API calls are in `dashboard_tick()`, called exclusively from the **main thread**.
-- `dashboard_tick()` ends with `lv_timer_handler()`.
+- The embedmq consumer thread (all `ui_on_*` callbacks) **only writes** to `SensorCache` (mutex-protected) via `Dashboard::instance().update_*()`.
+- All LVGL API calls are in `Dashboard::tick()`, called exclusively from the **main thread**.
+- `Dashboard::tick()` ends with `lv_timer_handler()`.
 
 Never call `lv_label_set_text` or any LVGL API from a callback or sensor thread.
 
@@ -122,25 +125,25 @@ Second parameter is `size_t`, not `uint16_t`.
 ## Build
 
 ```bash
-# PC 模拟器（Debug，最常用）
+# PC simulator (Debug, most common)
 ./tools/build.sh
 
-# PC 模拟器 + MQTT
+# PC simulator + MQTT
 ./tools/build.sh --mqtt
 
-# Release 构建
+# Release build
 ./tools/build.sh --release
 
-# 交叉编译（板子）
+# Cross-compile (board)
 ./tools/build.sh --board
 
-# 组合参数
+# Combined flags
 ./tools/build.sh --board --release --mqtt
 
-# 清除重编
+# Clean rebuild
 ./tools/build.sh --clean
 
-# 运行（终端1先启动 daemon，终端2启动 ui）
+# Run (start daemon first in terminal 1, then ui in terminal 2)
 ./build-sim/sensefusion-daemon
 ./build-sim/sensefusion-ui
 ```

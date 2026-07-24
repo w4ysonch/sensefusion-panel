@@ -590,12 +590,16 @@ extern "C" {
 
 ---
 
-## 十一、ui/ui_dashboard.c → ui_dashboard.cpp
+## 十一、ui/ui_dashboard.c → ui_dashboard.cpp ✅ 已完成
 
 ### 目标
 
 - 文件改 `.cpp`，机械替换让 C++ 占比达到 70%+
 - 引入 `LvglMemberEventThunk` 模板，把现有的静态回调函数改成类成员函数绑定，这是真正有技术深度可以讲的部分
+
+> **状态：已实现。** `LvglMemberEventThunk` 内联于 `ui/ui_dashboard.hpp`，Dashboard 单例于
+> `ui/ui_dashboard.cpp`，7 个事件回调均改为成员函数。`ui_handlers.cpp` 调用
+> `Dashboard::instance().update_*()`，`ui_ipc.cpp` 使用 `g_running.store(false)` 触发退出。
 
 ### 11.1 LvglMemberEventThunk 模板（新建 ui/lvgl_event_adapter.hpp）
 

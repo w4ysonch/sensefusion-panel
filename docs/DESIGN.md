@@ -62,18 +62,18 @@ input_ir          ┘  (embedmq_post_id)   ui_on_*(cache)   mutex_unlock      lv
 
 **两个进程各有独立的 `g_mq` 实例**，进程内存隔离，互不干扰。
 
-**daemon 侧**：sensor 线程 post → `daemon_handlers.c` 消费 → IPC send + algo + db + mqtt
+**daemon side**: sensor threads post → `daemon_handlers.cpp` consumes → IPC send + algo + db + mqtt
 
-**ui 侧**：ipc_recv/alert/input 线程 post → `ui_handlers.c` 消费 → `dashboard_update_*`
+**ui side**: ipc_recv/alert/input threads post → `ui_handlers.cpp` consumes → `Dashboard::instance().update_*()`
 
-```c
-// daemon/daemon_handlers.c — 每个 handler 串联四个操作
+```cpp
+// daemon/daemon_handlers.cpp — each handler chains four operations
 void daemon_on_dht11(const void *payload, size_t size, void *ctx) {
-    const evt_dht11_t *ev = payload;
-    ipc_socket_send(s_sock_fd, &frame);        // 1. 通过 UDS 推送给 ui_app
-    algo_comfort_on_dht11(payload, size, NULL); // 2. 触发算法
-    db_log_dht11(ev->temperature, ev->humidity);// 3. SQLite 持久化
-    mqtt_publish_dht11(ev->temperature, ev->humidity); // 4. MQTT 上报
+    const auto *ev = static_cast<const evt_dht11_t *>(payload);
+    ipc_socket_send(s_sock_fd, &frame);              // 1. push to ui via UDS
+    algo_comfort_on_dht11(payload, size, nullptr);   // 2. trigger algo
+    db_log_dht11(ev->temperature, ev->humidity);     // 3. SQLite persistence
+    mqtt_publish_dht11(ev->temperature, ev->humidity); // 4. MQTT publish
 }
 ```
 

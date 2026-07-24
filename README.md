@@ -116,12 +116,13 @@ cd sensefusion-panel
 
 ```
 sensefusion-panel/
-├── sensor_daemon.c         daemon 进程入口（传感器 + 算法 + DB + MQTT + IPC 发送）
-├── ui_app.c                UI 进程入口（LVGL + IPC 接收 + 输入处理）
+├── sensor_daemon.cpp       daemon 进程入口（传感器 + 算法 + DB + MQTT + IPC 发送）
+├── ui_app.cpp              UI 进程入口（LVGL + IPC 接收 + 输入处理）
 ├── common/
-│   └── app_common.h        两进程共用：extern g_mq、所有 EVT_* 宏及 payload 结构体
+│   ├── app_common.h        两进程共用：extern g_mq、所有 EVT_* 宏及 payload 结构体
+│   └── g_running.hpp       extern std::atomic<bool> g_running（各进程入口定义）
 ├── daemon/
-│   └── daemon_handlers.c/h embedmq 回调：IPC 发送 + algo + db + mqtt（daemon 专用）
+│   └── daemon_handlers.cpp/h  embedmq 回调：IPC 发送 + algo + db + mqtt（daemon 专用）
 ├── ipc/
 │   ├── ipc_protocol.h      跨进程协议：帧结构、告警消息、资源名常量
 │   ├── ipc_socket.c/h      Unix Domain Socket（传感器数据流，daemon→ui）
@@ -130,18 +131,18 @@ sensefusion-panel/
 ├── sensors/                5 路传感器采集线程（板子驱动 TODO，simulator 随机游走）
 ├── input/                  触摸屏（MT-B）与红外遥控输入线程（post 到 embedmq）
 ├── algo/
-│   ├── comfort_index.c/h   Steadman 热指数 -> 5 级舒适度
-│   └── anomaly.c/h         ADXL345 滑动窗口（8 样本）异常检测，阈值可运行时调整
+│   ├── comfort_index.cpp/hpp  Steadman 热指数 → ComfortLevel（C++ enum class）
+│   └── anomaly.cpp/hpp        ADXL345 滑动窗口（8 样本）异常检测，阈值可运行时调整
 ├── ui/
-│   ├── ui_dashboard.c/h    LVGL 四 Tab UI、sensor_cache_t、dashboard_tick()
-│   ├── ui_handlers.c/h     embedmq 回调：仅调用 dashboard_update_*（ui 专用）
-│   └── ui_ipc.c/h          IPC 接收线程：UDS + mq → embedmq_post（ui 专用）
+│   ├── ui_dashboard.cpp/hpp   Dashboard 单例、LvglMemberEventThunk、LVGL 四 Tab UI
+│   ├── ui_handlers.cpp/h      embedmq 回调 → Dashboard::instance().update_*()（ui 专用）
+│   └── ui_ipc.cpp/h           IPC 接收线程：UDS + mq → embedmq_post（ui 专用）
 ├── storage/
-│   ├── db.c/h              SQLite WAL 日志（每次传感器更新写入）
+│   ├── db.cpp/h            SQLite WAL 日志（每次传感器更新写入）
 │   ├── eeprom.c/h          AT24Cxx I2C EEPROM 驱动（页对齐写入，5ms 延迟）
-│   └── settings.c/h        持久化配置（亮度/温度单位/静音/异常阈值，魔数校验）
+│   └── settings.cpp/h      持久化配置（亮度/温度单位/静音/异常阈值，魔数校验）
 ├── network/
-│   └── mqtt_client.c/h     libmosquitto 异步发布，-DMQTT=ON 启用
+│   └── mqtt_client.cpp/h   libmosquitto 异步发布，-DMQTT=ON 启用
 ├── sim/
 │   └── lv_drv_sdl.c/h      PC 模拟器 SDL2 HAL（#ifdef SIMULATOR）
 ├── fonts/                  LVGL 自定义 CJK 字体（tools/gen_font.sh 扫源码自动生成）
