@@ -8,9 +8,8 @@
 #ifdef SIMULATOR
 #include "../sim/lv_drv_sdl.h"
 #else
+#include <unistd.h>
 #include <fcntl.h>
-#include <sys/ioctl.h>
-#include <linux/kd.h>
 #include "lvgl/drivers/display/lv_linux_fbdev.h"
 #endif
 
@@ -808,8 +807,6 @@ void Dashboard::init(const app_settings_t *settings)
     lv_init();
     lv_display_t *disp = lv_linux_fbdev_create();
     lv_linux_fbdev_set_file(disp, "/dev/fb0");
-    int tty_fd = open("/dev/console", O_RDWR);
-    if (tty_fd >= 0) { ioctl(tty_fd, KDSETMODE, KD_GRAPHICS); close(tty_fd); }
     printf("[dashboard] FBDEV /dev/fb0 初始化完成\n");
 #endif
     build_ui();
@@ -985,6 +982,16 @@ uint32_t Dashboard::tick()
         lv_label_set_text(label_db_val_, db_status_str());
         refresh_sysinfo();
     }
+
+#ifndef SIMULATOR
+    /* 周期性写 fb0 blank 节点防止内核息屏（consoleblank=600） */
+    static uint32_t blank_ticks = 0;
+    if (++blank_ticks >= 300) {
+        blank_ticks = 0;
+        int bf = open("/sys/class/graphics/fb0/blank", O_WRONLY);
+        if (bf >= 0) { write(bf, "0", 1); close(bf); }
+    }
+#endif
 
     return lv_timer_handler();
 }
